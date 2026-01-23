@@ -60,6 +60,19 @@ let options = FlagKitOptions.Builder(apiKey: "sdk_your_api_key")
     .eventFlushInterval(30)                         // Seconds between flushes
     .timeout(10)                                    // Request timeout in seconds
     .retryAttempts(3)                               // Number of retry attempts
+    .isLocal(false)                                 // Use local dev server (localhost:8200)
+    .build()
+
+let client = try await FlagKit.initialize(options: options)
+```
+
+## Local Development
+
+For local development, enable `isLocal` to connect to a local FlagKit server running on `http://localhost:8200`:
+
+```swift
+let options = FlagKitOptions.Builder(apiKey: "sdk_your_api_key")
+    .isLocal(true)
     .build()
 
 let client = try await FlagKit.initialize(options: options)

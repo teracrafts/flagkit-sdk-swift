@@ -68,6 +68,9 @@ public struct FlagKitOptions: Sendable {
     /// Bootstrap data.
     public let bootstrap: [String: Any]?
 
+    /// Whether to use local development server.
+    public let isLocal: Bool
+
     /// Creates new options.
     public init(
         apiKey: String,
@@ -82,7 +85,8 @@ public struct FlagKitOptions: Sendable {
         retryAttempts: Int = defaultRetryAttempts,
         circuitBreakerThreshold: Int = defaultCircuitBreakerThreshold,
         circuitBreakerResetTimeout: TimeInterval = defaultCircuitBreakerResetTimeout,
-        bootstrap: [String: Any]? = nil
+        bootstrap: [String: Any]? = nil,
+        isLocal: Bool = false
     ) {
         self.apiKey = apiKey
         self.pollingInterval = pollingInterval
@@ -97,6 +101,7 @@ public struct FlagKitOptions: Sendable {
         self.circuitBreakerThreshold = circuitBreakerThreshold
         self.circuitBreakerResetTimeout = circuitBreakerResetTimeout
         self.bootstrap = bootstrap
+        self.isLocal = isLocal
     }
 
     /// Validates the options.
@@ -138,6 +143,7 @@ extension FlagKitOptions {
         private var circuitBreakerThreshold: Int = FlagKitOptions.defaultCircuitBreakerThreshold
         private var circuitBreakerResetTimeout: TimeInterval = FlagKitOptions.defaultCircuitBreakerResetTimeout
         private var bootstrap: [String: Any]?
+        private var isLocal: Bool = false
 
         public init(apiKey: String) {
             self.apiKey = apiKey
@@ -203,6 +209,12 @@ extension FlagKitOptions {
             return self
         }
 
+        @discardableResult
+        public func isLocal(_ value: Bool) -> Builder {
+            self.isLocal = value
+            return self
+        }
+
         public func build() -> FlagKitOptions {
             FlagKitOptions(
                 apiKey: apiKey,
@@ -217,7 +229,8 @@ extension FlagKitOptions {
                 retryAttempts: retryAttempts,
                 circuitBreakerThreshold: circuitBreakerThreshold,
                 circuitBreakerResetTimeout: circuitBreakerResetTimeout,
-                bootstrap: bootstrap
+                bootstrap: bootstrap,
+                isLocal: isLocal
             )
         }
     }

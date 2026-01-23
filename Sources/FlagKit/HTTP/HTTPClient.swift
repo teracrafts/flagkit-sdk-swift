@@ -5,6 +5,9 @@ actor HTTPClient {
     /// The base URL for the FlagKit API.
     static let baseURL = "https://api.flagkit.dev/api/v1"
 
+    /// The base URL for local development.
+    private static let localBaseURL = "http://localhost:8200/api/v1"
+
     private static let baseRetryDelay: TimeInterval = 1.0
     private static let maxRetryDelay: TimeInterval = 30.0
     private static let retryMultiplier: Double = 2.0
@@ -15,17 +18,20 @@ actor HTTPClient {
     private let retryAttempts: Int
     private let circuitBreaker: CircuitBreaker
     private let session: URLSession
+    private let isLocal: Bool
 
     init(
         apiKey: String,
         timeout: TimeInterval,
         retryAttempts: Int,
-        circuitBreaker: CircuitBreaker
+        circuitBreaker: CircuitBreaker,
+        isLocal: Bool = false
     ) {
         self.apiKey = apiKey
         self.timeout = timeout
         self.retryAttempts = retryAttempts
         self.circuitBreaker = circuitBreaker
+        self.isLocal = isLocal
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = timeout
@@ -90,7 +96,8 @@ actor HTTPClient {
         params: [String: String]?,
         body: [String: Any]?
     ) async throws -> [String: Any] {
-        var urlString = "\(Self.baseURL)\(path)"
+        let effectiveBaseURL = isLocal ? Self.localBaseURL : Self.baseURL
+        var urlString = "\(effectiveBaseURL)\(path)"
 
         if let params = params, !params.isEmpty {
             let queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) }

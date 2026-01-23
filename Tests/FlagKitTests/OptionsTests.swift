@@ -17,6 +17,7 @@ final class OptionsTests: XCTestCase {
         XCTAssertEqual(options.retryAttempts, 3)
         XCTAssertEqual(options.circuitBreakerThreshold, 5)
         XCTAssertEqual(options.circuitBreakerResetTimeout, 30)
+        XCTAssertFalse(options.isLocal)
     }
 
     func testCustomValues() {
@@ -103,5 +104,26 @@ final class OptionsTests: XCTestCase {
         XCTAssertEqual(options.cacheTTL, 600)
         XCTAssertFalse(options.cacheEnabled)
         XCTAssertFalse(options.eventsEnabled)
+    }
+
+    func testIsLocalOption() {
+        let options = FlagKitOptions(apiKey: "sdk_test_key", isLocal: true)
+
+        XCTAssertTrue(options.isLocal)
+    }
+
+    func testIsLocalBuilder() {
+        let options = FlagKitOptions.Builder(apiKey: "sdk_test")
+            .isLocal(true)
+            .build()
+
+        XCTAssertTrue(options.isLocal)
+    }
+
+    func testIsLocalDefaultFalse() {
+        let options = FlagKitOptions.Builder(apiKey: "sdk_test")
+            .build()
+
+        XCTAssertFalse(options.isLocal)
     }
 }
