@@ -68,8 +68,8 @@ public struct FlagKitOptions: Sendable {
     /// Bootstrap data.
     public let bootstrap: [String: Any]?
 
-    /// Whether to use local development server.
-    public let isLocal: Bool
+    /// Local development server port. When set, uses http://localhost:{port}/api/v1.
+    public let localPort: Int?
 
     /// Creates new options.
     public init(
@@ -86,7 +86,7 @@ public struct FlagKitOptions: Sendable {
         circuitBreakerThreshold: Int = defaultCircuitBreakerThreshold,
         circuitBreakerResetTimeout: TimeInterval = defaultCircuitBreakerResetTimeout,
         bootstrap: [String: Any]? = nil,
-        isLocal: Bool = false
+        localPort: Int? = nil
     ) {
         self.apiKey = apiKey
         self.pollingInterval = pollingInterval
@@ -101,7 +101,7 @@ public struct FlagKitOptions: Sendable {
         self.circuitBreakerThreshold = circuitBreakerThreshold
         self.circuitBreakerResetTimeout = circuitBreakerResetTimeout
         self.bootstrap = bootstrap
-        self.isLocal = isLocal
+        self.localPort = localPort
     }
 
     /// Validates the options.
@@ -143,7 +143,7 @@ extension FlagKitOptions {
         private var circuitBreakerThreshold: Int = FlagKitOptions.defaultCircuitBreakerThreshold
         private var circuitBreakerResetTimeout: TimeInterval = FlagKitOptions.defaultCircuitBreakerResetTimeout
         private var bootstrap: [String: Any]?
-        private var isLocal: Bool = false
+        private var localPort: Int?
 
         public init(apiKey: String) {
             self.apiKey = apiKey
@@ -210,8 +210,8 @@ extension FlagKitOptions {
         }
 
         @discardableResult
-        public func isLocal(_ value: Bool) -> Builder {
-            self.isLocal = value
+        public func localPort(_ port: Int) -> Builder {
+            self.localPort = port
             return self
         }
 
@@ -230,7 +230,7 @@ extension FlagKitOptions {
                 circuitBreakerThreshold: circuitBreakerThreshold,
                 circuitBreakerResetTimeout: circuitBreakerResetTimeout,
                 bootstrap: bootstrap,
-                isLocal: isLocal
+                localPort: localPort
             )
         }
     }

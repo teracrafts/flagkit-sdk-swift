@@ -5,8 +5,13 @@ actor HTTPClient {
     /// The base URL for the FlagKit API.
     static let baseURL = "https://api.flagkit.dev/api/v1"
 
-    /// The base URL for local development.
-    private static let localBaseURL = "http://localhost:8200/api/v1"
+    /// Returns the base URL for the given local port, or the default production URL.
+    static func getBaseUrl(localPort: Int?) -> String {
+        if let port = localPort {
+            return "http://localhost:\(port)/api/v1"
+        }
+        return baseURL
+    }
 
     private static let baseRetryDelay: TimeInterval = 1.0
     private static let maxRetryDelay: TimeInterval = 30.0
@@ -18,20 +23,20 @@ actor HTTPClient {
     private let retryAttempts: Int
     private let circuitBreaker: CircuitBreaker
     private let session: URLSession
-    private let isLocal: Bool
+    private let localPort: Int?
 
     init(
         apiKey: String,
         timeout: TimeInterval,
         retryAttempts: Int,
         circuitBreaker: CircuitBreaker,
-        isLocal: Bool = false
+        localPort: Int? = nil
     ) {
         self.apiKey = apiKey
         self.timeout = timeout
         self.retryAttempts = retryAttempts
         self.circuitBreaker = circuitBreaker
-        self.isLocal = isLocal
+        self.localPort = localPort
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = timeout
@@ -96,7 +101,7 @@ actor HTTPClient {
         params: [String: String]?,
         body: [String: Any]?
     ) async throws -> [String: Any] {
-        let effectiveBaseURL = isLocal ? Self.localBaseURL : Self.baseURL
+        let effectiveBaseURL = Self.getBaseUrl(localPort: localPort)
         var urlString = "\(effectiveBaseURL)\(path)"
 
         if let params = params, !params.isEmpty {
