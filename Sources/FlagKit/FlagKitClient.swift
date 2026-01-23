@@ -24,7 +24,6 @@ public actor FlagKitClient {
         )
 
         self.httpClient = HTTPClient(
-            baseURL: options.baseURL,
             apiKey: options.apiKey,
             timeout: options.timeout,
             retryAttempts: options.retryAttempts,

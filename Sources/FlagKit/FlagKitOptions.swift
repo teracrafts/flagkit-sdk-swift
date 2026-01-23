@@ -2,9 +2,6 @@ import Foundation
 
 /// Configuration options for the FlagKit SDK.
 public struct FlagKitOptions: Sendable {
-    /// Default base URL.
-    public static let defaultBaseURL = "https://api.flagkit.dev/api/v1"
-
     /// Default polling interval in seconds.
     public static let defaultPollingInterval: TimeInterval = 30
 
@@ -34,9 +31,6 @@ public struct FlagKitOptions: Sendable {
 
     /// The API key.
     public let apiKey: String
-
-    /// The base URL.
-    public let baseURL: String
 
     /// Polling interval in seconds.
     public let pollingInterval: TimeInterval
@@ -77,7 +71,6 @@ public struct FlagKitOptions: Sendable {
     /// Creates new options.
     public init(
         apiKey: String,
-        baseURL: String = defaultBaseURL,
         pollingInterval: TimeInterval = defaultPollingInterval,
         cacheTTL: TimeInterval = defaultCacheTTL,
         maxCacheSize: Int = defaultMaxCacheSize,
@@ -92,7 +85,6 @@ public struct FlagKitOptions: Sendable {
         bootstrap: [String: Any]? = nil
     ) {
         self.apiKey = apiKey
-        self.baseURL = baseURL
         self.pollingInterval = pollingInterval
         self.cacheTTL = cacheTTL
         self.maxCacheSize = maxCacheSize
@@ -118,10 +110,6 @@ public struct FlagKitOptions: Sendable {
             throw FlagKitError.configError(code: .configInvalidApiKey, message: "Invalid API key format")
         }
 
-        guard let url = URL(string: baseURL), url.scheme != nil, url.host != nil else {
-            throw FlagKitError.configError(code: .configInvalidBaseUrl, message: "Invalid base URL")
-        }
-
         guard pollingInterval > 0 else {
             throw FlagKitError.configError(code: .configInvalidPollingInterval, message: "Polling interval must be positive")
         }
@@ -138,7 +126,6 @@ extension FlagKitOptions {
     /// A builder for creating options.
     public class Builder {
         private var apiKey: String
-        private var baseURL: String = FlagKitOptions.defaultBaseURL
         private var pollingInterval: TimeInterval = FlagKitOptions.defaultPollingInterval
         private var cacheTTL: TimeInterval = FlagKitOptions.defaultCacheTTL
         private var maxCacheSize: Int = FlagKitOptions.defaultMaxCacheSize
@@ -154,12 +141,6 @@ extension FlagKitOptions {
 
         public init(apiKey: String) {
             self.apiKey = apiKey
-        }
-
-        @discardableResult
-        public func baseURL(_ url: String) -> Builder {
-            self.baseURL = url
-            return self
         }
 
         @discardableResult
@@ -225,7 +206,6 @@ extension FlagKitOptions {
         public func build() -> FlagKitOptions {
             FlagKitOptions(
                 apiKey: apiKey,
-                baseURL: baseURL,
                 pollingInterval: pollingInterval,
                 cacheTTL: cacheTTL,
                 maxCacheSize: maxCacheSize,

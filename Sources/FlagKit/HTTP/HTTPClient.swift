@@ -2,12 +2,14 @@ import Foundation
 
 /// HTTP client with retry logic and circuit breaker integration.
 actor HTTPClient {
+    /// The base URL for the FlagKit API.
+    static let baseURL = "https://api.flagkit.dev/api/v1"
+
     private static let baseRetryDelay: TimeInterval = 1.0
     private static let maxRetryDelay: TimeInterval = 30.0
     private static let retryMultiplier: Double = 2.0
     private static let jitterFactor: Double = 0.1
 
-    private let baseURL: String
     private let apiKey: String
     private let timeout: TimeInterval
     private let retryAttempts: Int
@@ -15,13 +17,11 @@ actor HTTPClient {
     private let session: URLSession
 
     init(
-        baseURL: String,
         apiKey: String,
         timeout: TimeInterval,
         retryAttempts: Int,
         circuitBreaker: CircuitBreaker
     ) {
-        self.baseURL = baseURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
         self.apiKey = apiKey
         self.timeout = timeout
         self.retryAttempts = retryAttempts
@@ -90,7 +90,7 @@ actor HTTPClient {
         params: [String: String]?,
         body: [String: Any]?
     ) async throws -> [String: Any] {
-        var urlString = "\(baseURL)\(path)"
+        var urlString = "\(Self.baseURL)\(path)"
 
         if let params = params, !params.isEmpty {
             let queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) }

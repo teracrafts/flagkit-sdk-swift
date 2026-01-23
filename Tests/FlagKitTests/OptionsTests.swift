@@ -6,7 +6,6 @@ final class OptionsTests: XCTestCase {
         let options = FlagKitOptions(apiKey: "sdk_test_key")
 
         XCTAssertEqual(options.apiKey, "sdk_test_key")
-        XCTAssertEqual(options.baseURL, "https://api.flagkit.dev/api/v1")
         XCTAssertEqual(options.pollingInterval, 30)
         XCTAssertEqual(options.cacheTTL, 300)
         XCTAssertEqual(options.maxCacheSize, 1000)
@@ -23,13 +22,11 @@ final class OptionsTests: XCTestCase {
     func testCustomValues() {
         let options = FlagKitOptions(
             apiKey: "sdk_custom_key",
-            baseURL: "https://custom.api.com",
             pollingInterval: 60,
             cacheTTL: 600,
             cacheEnabled: false
         )
 
-        XCTAssertEqual(options.baseURL, "https://custom.api.com")
         XCTAssertEqual(options.pollingInterval, 60)
         XCTAssertEqual(options.cacheTTL, 600)
         XCTAssertFalse(options.cacheEnabled)
@@ -69,18 +66,6 @@ final class OptionsTests: XCTestCase {
         }
     }
 
-    func testValidateInvalidBaseUrl() {
-        let options = FlagKitOptions(apiKey: "sdk_test", baseURL: "not-a-url")
-
-        XCTAssertThrowsError(try options.validate()) { error in
-            guard let flagKitError = error as? FlagKitError else {
-                XCTFail("Expected FlagKitError")
-                return
-            }
-            XCTAssertEqual(flagKitError.code, .configInvalidBaseUrl)
-        }
-    }
-
     func testValidateNonPositivePollingInterval() {
         let options = FlagKitOptions(apiKey: "sdk_test", pollingInterval: 0)
 
@@ -107,7 +92,6 @@ final class OptionsTests: XCTestCase {
 
     func testBuilder() {
         let options = FlagKitOptions.Builder(apiKey: "sdk_test")
-            .baseURL("https://custom.api.com")
             .pollingInterval(60)
             .cacheTTL(600)
             .cacheEnabled(false)
@@ -115,7 +99,6 @@ final class OptionsTests: XCTestCase {
             .build()
 
         XCTAssertEqual(options.apiKey, "sdk_test")
-        XCTAssertEqual(options.baseURL, "https://custom.api.com")
         XCTAssertEqual(options.pollingInterval, 60)
         XCTAssertEqual(options.cacheTTL, 600)
         XCTAssertFalse(options.cacheEnabled)

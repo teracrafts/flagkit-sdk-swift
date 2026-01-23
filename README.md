@@ -52,7 +52,6 @@ await FlagKit.shutdown()
 
 ```swift
 let options = FlagKitOptions.Builder(apiKey: "sdk_your_api_key")
-    .baseURL("https://api.flagkit.dev/api/v1")     // API base URL
     .pollingInterval(30)                            // Seconds between polls
     .cacheTTL(300)                                  // Cache time-to-live in seconds
     .cacheEnabled(true)                             // Enable/disable caching
