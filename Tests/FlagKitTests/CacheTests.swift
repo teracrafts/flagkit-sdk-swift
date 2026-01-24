@@ -80,7 +80,7 @@ final class CacheTests: XCTestCase {
         await cache.set("key1", value: "value1")
         await cache.set("key2", value: "value2")
 
-        let keys = await cache.keys
+        let keys = await cache.getAllKeys()
 
         XCTAssertEqual(Set(keys), Set(["key1", "key2"]))
     }
@@ -96,16 +96,69 @@ final class CacheTests: XCTestCase {
         XCTAssertEqual(dict, ["key1": "value1", "key2": "value2"])
     }
 
-    func testSetAll() async {
+    func testSetMany() async {
         let cache = Cache<String>(ttl: 60, maxSize: 10)
 
-        await cache.setAll(["key1": "value1", "key2": "value2"])
+        await cache.setMany(["key1": "value1", "key2": "value2"])
 
         let value1 = await cache.get("key1")
         let value2 = await cache.get("key2")
 
         XCTAssertEqual(value1, "value1")
         XCTAssertEqual(value2, "value2")
+    }
+
+    func testGetStaleValue() async throws {
+        let cache = Cache<String>(ttl: 0.1, maxSize: 10)
+
+        await cache.set("key1", value: "value1")
+
+        // Wait for expiration
+        try await Task.sleep(nanoseconds: 150_000_000) // 0.15 seconds
+
+        // Stale value should be available even after expiration
+        // Note: We check stale value BEFORE calling get(), because get() removes expired entries
+        let staleValue = await cache.getStaleValue("key1")
+        XCTAssertEqual(staleValue, "value1")
+
+        // Now regular get should return nil and remove the entry
+        let expiredValue = await cache.get("key1")
+        XCTAssertNil(expiredValue)
+
+        // After get() was called, the entry is removed
+        let staleValueAfter = await cache.getStaleValue("key1")
+        XCTAssertNil(staleValueAfter)
+    }
+
+    func testIsStale() async throws {
+        let cache = Cache<String>(ttl: 0.1, maxSize: 10)
+
+        await cache.set("key1", value: "value1")
+
+        // Initially not stale
+        let notStale = await cache.isStale("key1")
+        XCTAssertFalse(notStale)
+
+        // Wait for expiration
+        try await Task.sleep(nanoseconds: 150_000_000) // 0.15 seconds
+
+        // Now should be stale
+        let isStale = await cache.isStale("key1")
+        XCTAssertTrue(isStale)
+    }
+
+    func testGetStats() async {
+        let cache = Cache<String>(ttl: 60, maxSize: 100)
+
+        await cache.set("key1", value: "value1")
+        await cache.set("key2", value: "value2")
+
+        let stats = await cache.getStats()
+
+        XCTAssertEqual(stats.size, 2)
+        XCTAssertEqual(stats.validCount, 2)
+        XCTAssertEqual(stats.staleCount, 0)
+        XCTAssertEqual(stats.maxSize, 100)
     }
 
     func testTTLExpiration() async throws {
