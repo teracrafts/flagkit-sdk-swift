@@ -1,32 +1,150 @@
 import Foundation
 
-/// Batches and sends analytics events.
-actor EventQueue {
-    private let batchSize: Int
-    private let flushInterval: TimeInterval
+/// Event types supported by FlagKit.
+public enum EventType: String, Sendable {
+    case evaluation = "evaluation"
+    case identify = "identify"
+    case track = "track"
+    case pageView = "page_view"
+    case sdkInitialized = "sdk_initialized"
+    case contextChanged = "context_changed"
+    case custom = "custom"
+}
+
+/// Configuration for the event queue.
+public struct EventQueueConfig: Sendable {
+    /// Maximum events per batch. Default: 10.
+    public let batchSize: Int
+
+    /// Seconds between flushes. Default: 30.
+    public let flushInterval: TimeInterval
+
+    /// Maximum queue size before dropping oldest events. Default: 1000.
+    public let maxQueueSize: Int
+
+    /// Maximum retry attempts for failed flushes. Default: 3.
+    public let maxRetryAttempts: Int
+
+    /// Sample rate for events (0.0 - 1.0). Default: 1.0 (all events).
+    public let sampleRate: Double
+
+    /// Creates event queue configuration.
+    public init(
+        batchSize: Int = 10,
+        flushInterval: TimeInterval = 30,
+        maxQueueSize: Int = 1000,
+        maxRetryAttempts: Int = 3,
+        sampleRate: Double = 1.0
+    ) {
+        self.batchSize = batchSize
+        self.flushInterval = flushInterval
+        self.maxQueueSize = maxQueueSize
+        self.maxRetryAttempts = maxRetryAttempts
+        self.sampleRate = min(1.0, max(0.0, sampleRate))
+    }
+}
+
+/// An analytics event to be sent to FlagKit.
+public struct AnalyticsEvent: Sendable {
+    /// The event type.
+    public let eventType: String
+
+    /// Event data.
+    public let eventData: [String: Any]?
+
+    /// Timestamp when the event occurred.
+    public let timestamp: Date
+
+    /// User ID associated with the event.
+    public let userId: String?
+
+    /// Session ID.
+    public let sessionId: String?
+
+    /// SDK version.
+    public let sdkVersion: String
+
+    /// Creates a new analytics event.
+    public init(
+        eventType: String,
+        eventData: [String: Any]? = nil,
+        timestamp: Date = Date(),
+        userId: String? = nil,
+        sessionId: String? = nil,
+        sdkVersion: String = "1.0.0"
+    ) {
+        self.eventType = eventType
+        self.eventData = eventData
+        self.timestamp = timestamp
+        self.userId = userId
+        self.sessionId = sessionId
+        self.sdkVersion = sdkVersion
+    }
+
+    /// Converts to a dictionary for API requests.
+    public func toDictionary() -> [String: Any] {
+        var dict: [String: Any] = [
+            "eventType": eventType,
+            "timestamp": ISO8601DateFormatter().string(from: timestamp),
+            "sdkVersion": sdkVersion,
+            "sdkLanguage": "swift"
+        ]
+
+        if let userId = userId {
+            dict["userId"] = userId
+        }
+
+        if let sessionId = sessionId {
+            dict["sessionId"] = sessionId
+        }
+
+        if let eventData = eventData {
+            dict["eventData"] = eventData
+        }
+
+        return dict
+    }
+}
+
+/// Batches and sends analytics events with retry support.
+public actor EventQueue {
+    private let config: EventQueueConfig
     private let onFlush: ([[String: Any]]) async throws -> Void
 
-    private var queue: [[String: Any]] = []
+    private var queue: [AnalyticsEvent] = []
     private var isRunning = false
+    private var isFlushing = false
     private var task: Task<Void, Never>?
+    private var consecutiveFailures = 0
 
     /// Creates a new event queue.
+    /// - Parameters:
+    ///   - config: Event queue configuration.
+    ///   - onFlush: Callback to send events to the server.
+    public init(
+        config: EventQueueConfig = EventQueueConfig(),
+        onFlush: @escaping ([[String: Any]]) async throws -> Void
+    ) {
+        self.config = config
+        self.onFlush = onFlush
+    }
+
+    /// Creates a new event queue with basic parameters.
     /// - Parameters:
     ///   - batchSize: Maximum events per batch.
     ///   - flushInterval: Seconds between flushes.
     ///   - onFlush: Callback to send events.
-    init(
+    public init(
         batchSize: Int,
         flushInterval: TimeInterval,
         onFlush: @escaping ([[String: Any]]) async throws -> Void
     ) {
-        self.batchSize = batchSize
-        self.flushInterval = flushInterval
+        self.config = EventQueueConfig(batchSize: batchSize, flushInterval: flushInterval)
         self.onFlush = onFlush
     }
 
     /// Starts the background flush task.
-    func start() {
+    public func start() {
         guard !isRunning else { return }
 
         isRunning = true
@@ -35,51 +153,135 @@ actor EventQueue {
         }
     }
 
-    /// Stops the background flush task.
-    func stop() async {
+    /// Stops the background flush task and flushes remaining events.
+    public func stop() async {
         isRunning = false
         task?.cancel()
         task = nil
+
+        // Flush any remaining events
         await flush()
     }
 
     /// Adds an event to the queue.
-    func enqueue(_ event: [String: Any]) async {
+    /// - Parameter event: The event to add.
+    public func add(_ event: AnalyticsEvent) async {
+        // Apply sampling
+        if config.sampleRate < 1.0 && Double.random(in: 0...1) > config.sampleRate {
+            return
+        }
+
+        // Enforce max queue size
+        if queue.count >= config.maxQueueSize {
+            // Drop oldest event
+            queue.removeFirst()
+        }
+
         queue.append(event)
 
-        if queue.count >= batchSize {
+        // Flush if batch size reached
+        if queue.count >= config.batchSize {
             await flush()
         }
     }
 
-    /// Flushes all pending events.
-    func flush() async {
-        guard !queue.isEmpty else { return }
+    /// Adds an event dictionary to the queue (legacy support).
+    /// - Parameter event: The event dictionary to add.
+    public func enqueue(_ event: [String: Any]) async {
+        let analyticsEvent = AnalyticsEvent(
+            eventType: event["type"] as? String ?? event["eventType"] as? String ?? "custom",
+            eventData: event["data"] as? [String: Any] ?? event["eventData"] as? [String: Any],
+            userId: event["userId"] as? String,
+            sessionId: event["sessionId"] as? String
+        )
+        await add(analyticsEvent)
+    }
+
+    /// Flushes all pending events immediately.
+    public func flush() async {
+        guard !queue.isEmpty && !isFlushing else { return }
+
+        isFlushing = true
+        defer { isFlushing = false }
 
         let events = queue
         queue.removeAll()
 
+        let eventDicts = events.map { $0.toDictionary() }
+
         do {
-            try await onFlush(events)
+            try await sendWithRetry(eventDicts)
+            consecutiveFailures = 0
         } catch {
-            // Re-queue events on failure
-            queue = events + queue
+            // Re-queue failed events (up to max size)
+            let requeue = Array(events.prefix(config.maxQueueSize - queue.count))
+            queue = requeue + queue
+            consecutiveFailures += 1
         }
     }
 
+    /// Clears all pending events without sending them.
+    public func clearQueue() {
+        queue.removeAll()
+    }
+
     /// Returns the number of pending events.
-    var count: Int {
+    public var count: Int {
         queue.count
     }
 
     /// Whether the queue is running.
-    var running: Bool {
+    public var running: Bool {
         isRunning
+    }
+
+    /// Gets queued events for debugging.
+    public func getQueuedEvents() -> [AnalyticsEvent] {
+        return queue
+    }
+
+    // MARK: - Private Methods
+
+    private func sendWithRetry(_ events: [[String: Any]]) async throws {
+        var lastError: Error?
+
+        for attempt in 1...config.maxRetryAttempts {
+            do {
+                try await onFlush(events)
+                return
+            } catch {
+                lastError = error
+
+                if attempt < config.maxRetryAttempts {
+                    // Exponential backoff with jitter
+                    let delay = calculateBackoff(attempt: attempt)
+                    try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+                }
+            }
+        }
+
+        throw lastError ?? FlagKitError(code: .eventFlushFailed, message: "Failed to flush events after \(config.maxRetryAttempts) attempts")
+    }
+
+    private func calculateBackoff(attempt: Int) -> TimeInterval {
+        let baseDelay: TimeInterval = 1.0
+        let maxDelay: TimeInterval = 30.0
+        let multiplier: Double = 2.0
+
+        let exponentialDelay = baseDelay * pow(multiplier, Double(attempt - 1))
+        let cappedDelay = min(exponentialDelay, maxDelay)
+        let jitter = cappedDelay * 0.1 * Double.random(in: 0...1)
+
+        return cappedDelay + jitter
     }
 
     private func flushLoop() async {
         while isRunning {
-            try? await Task.sleep(nanoseconds: UInt64(flushInterval * 1_000_000_000))
+            // Add jitter to prevent thundering herd
+            let jitter = config.flushInterval * 0.1 * Double.random(in: 0...1)
+            let sleepDuration = config.flushInterval + jitter
+
+            try? await Task.sleep(nanoseconds: UInt64(sleepDuration * 1_000_000_000))
 
             guard isRunning else { break }
 
