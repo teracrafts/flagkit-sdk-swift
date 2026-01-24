@@ -119,7 +119,7 @@ actor HTTPClient {
         request.httpMethod = method.rawValue
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
         request.setValue("FlagKit-Swift/1.0.0", forHTTPHeaderField: "User-Agent")
 
         if let body = body {
