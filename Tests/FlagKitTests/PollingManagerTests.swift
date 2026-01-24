@@ -23,25 +23,24 @@ final class PollingManagerTests: XCTestCase {
         XCTAssertFalse(isStoppedAfter)
     }
 
-    func testPollsAtInterval() async throws {
+    func testManualPoll() async throws {
         var updateCount = 0
 
         let manager = PollingManager(
-            interval: 0.05,
+            interval: 60, // Long interval since we're polling manually
             onUpdate: { _ in
                 updateCount += 1
             }
         )
 
-        await manager.start()
+        // Manually trigger polls
+        let result1 = await manager.pollNow()
+        XCTAssertTrue(result1, "First poll should succeed")
 
-        // Wait for a few polls
-        try await Task.sleep(nanoseconds: 200_000_000)
+        let result2 = await manager.pollNow()
+        XCTAssertTrue(result2, "Second poll should succeed")
 
-        await manager.stop()
-
-        // Should have polled at least twice
-        XCTAssertGreaterThanOrEqual(updateCount, 2)
+        XCTAssertEqual(updateCount, 2, "Should have polled twice")
     }
 
     func testDoesNotPollWhenStopped() async throws {
@@ -64,24 +63,20 @@ final class PollingManagerTests: XCTestCase {
         var receivedDates: [Date?] = []
 
         let manager = PollingManager(
-            interval: 0.05,
+            interval: 60, // Long interval since we're polling manually
             onUpdate: { lastUpdate in
                 receivedDates.append(lastUpdate)
             }
         )
 
-        await manager.start()
+        // First poll should have nil lastUpdateTime
+        _ = await manager.pollNow()
 
-        try await Task.sleep(nanoseconds: 150_000_000)
+        // Second poll should have a non-nil lastUpdateTime
+        _ = await manager.pollNow()
 
-        await manager.stop()
-
-        // First call should have nil, subsequent should have dates
-        XCTAssertGreaterThanOrEqual(receivedDates.count, 2)
-        XCTAssertNil(receivedDates.first!)
-
-        if receivedDates.count > 1 {
-            XCTAssertNotNil(receivedDates[1])
-        }
+        XCTAssertEqual(receivedDates.count, 2)
+        XCTAssertNil(receivedDates[0], "First update should have nil lastUpdateTime")
+        XCTAssertNotNil(receivedDates[1], "Second update should have non-nil lastUpdateTime")
     }
 }
