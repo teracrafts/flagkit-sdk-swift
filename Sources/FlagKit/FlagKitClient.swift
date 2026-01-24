@@ -28,7 +28,7 @@ public actor FlagKitClient {
             timeout: options.timeout,
             retryAttempts: options.retryAttempts,
             circuitBreaker: circuitBreaker,
-            isLocal: options.isLocal
+            localPort: options.localPort
         )
 
         self.cache = Cache(
