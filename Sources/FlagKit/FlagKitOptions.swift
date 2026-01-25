@@ -29,6 +29,12 @@ public struct FlagKitOptions: Sendable {
     /// Default circuit breaker reset timeout in seconds.
     public static let defaultCircuitBreakerResetTimeout: TimeInterval = 30
 
+    /// Default maximum persisted events.
+    public static let defaultMaxPersistedEvents = 10000
+
+    /// Default persistence flush interval in seconds.
+    public static let defaultPersistenceFlushInterval: TimeInterval = 1.0
+
     /// The API key.
     public let apiKey: String
 
@@ -83,6 +89,18 @@ public struct FlagKitOptions: Sendable {
     /// Enable cache encryption using AES-GCM.
     public let enableCacheEncryption: Bool
 
+    /// Enable crash-resilient event persistence.
+    public let persistEvents: Bool
+
+    /// Directory path for event storage. If nil, uses OS temp directory.
+    public let eventStoragePath: String?
+
+    /// Maximum number of events to persist.
+    public let maxPersistedEvents: Int
+
+    /// Interval between disk flushes in seconds.
+    public let persistenceFlushInterval: TimeInterval
+
     /// Creates new options.
     public init(
         apiKey: String,
@@ -102,7 +120,11 @@ public struct FlagKitOptions: Sendable {
         localPort: Int? = nil,
         strictPIIMode: Bool = false,
         enableRequestSigning: Bool = false,
-        enableCacheEncryption: Bool = false
+        enableCacheEncryption: Bool = false,
+        persistEvents: Bool = false,
+        eventStoragePath: String? = nil,
+        maxPersistedEvents: Int = defaultMaxPersistedEvents,
+        persistenceFlushInterval: TimeInterval = defaultPersistenceFlushInterval
     ) {
         self.apiKey = apiKey
         self.secondaryApiKey = secondaryApiKey
@@ -122,6 +144,10 @@ public struct FlagKitOptions: Sendable {
         self.strictPIIMode = strictPIIMode
         self.enableRequestSigning = enableRequestSigning
         self.enableCacheEncryption = enableCacheEncryption
+        self.persistEvents = persistEvents
+        self.eventStoragePath = eventStoragePath
+        self.maxPersistedEvents = maxPersistedEvents
+        self.persistenceFlushInterval = persistenceFlushInterval
     }
 
     /// Validates the options.
@@ -178,6 +204,10 @@ extension FlagKitOptions {
         private var strictPIIMode: Bool = false
         private var enableRequestSigning: Bool = false
         private var enableCacheEncryption: Bool = false
+        private var persistEvents: Bool = false
+        private var eventStoragePath: String?
+        private var maxPersistedEvents: Int = FlagKitOptions.defaultMaxPersistedEvents
+        private var persistenceFlushInterval: TimeInterval = FlagKitOptions.defaultPersistenceFlushInterval
 
         public init(apiKey: String) {
             self.apiKey = apiKey
@@ -273,6 +303,30 @@ extension FlagKitOptions {
             return self
         }
 
+        @discardableResult
+        public func persistEvents(_ enabled: Bool) -> Builder {
+            self.persistEvents = enabled
+            return self
+        }
+
+        @discardableResult
+        public func eventStoragePath(_ path: String) -> Builder {
+            self.eventStoragePath = path
+            return self
+        }
+
+        @discardableResult
+        public func maxPersistedEvents(_ max: Int) -> Builder {
+            self.maxPersistedEvents = max
+            return self
+        }
+
+        @discardableResult
+        public func persistenceFlushInterval(_ interval: TimeInterval) -> Builder {
+            self.persistenceFlushInterval = interval
+            return self
+        }
+
         public func build() -> FlagKitOptions {
             FlagKitOptions(
                 apiKey: apiKey,
@@ -292,7 +346,11 @@ extension FlagKitOptions {
                 localPort: localPort,
                 strictPIIMode: strictPIIMode,
                 enableRequestSigning: enableRequestSigning,
-                enableCacheEncryption: enableCacheEncryption
+                enableCacheEncryption: enableCacheEncryption,
+                persistEvents: persistEvents,
+                eventStoragePath: eventStoragePath,
+                maxPersistedEvents: maxPersistedEvents,
+                persistenceFlushInterval: persistenceFlushInterval
             )
         }
     }
