@@ -28,19 +28,39 @@ public struct EventQueueConfig: Sendable {
     /// Sample rate for events (0.0 - 1.0). Default: 1.0 (all events).
     public let sampleRate: Double
 
+    /// Enable crash-resilient event persistence.
+    public let persistEvents: Bool
+
+    /// Directory path for event storage.
+    public let eventStoragePath: String?
+
+    /// Maximum number of events to persist.
+    public let maxPersistedEvents: Int
+
+    /// Interval between disk flushes in seconds.
+    public let persistenceFlushInterval: TimeInterval
+
     /// Creates event queue configuration.
     public init(
         batchSize: Int = 10,
         flushInterval: TimeInterval = 30,
         maxQueueSize: Int = 1000,
         maxRetryAttempts: Int = 3,
-        sampleRate: Double = 1.0
+        sampleRate: Double = 1.0,
+        persistEvents: Bool = false,
+        eventStoragePath: String? = nil,
+        maxPersistedEvents: Int = 10000,
+        persistenceFlushInterval: TimeInterval = 1.0
     ) {
         self.batchSize = batchSize
         self.flushInterval = flushInterval
         self.maxQueueSize = maxQueueSize
         self.maxRetryAttempts = maxRetryAttempts
         self.sampleRate = min(1.0, max(0.0, sampleRate))
+        self.persistEvents = persistEvents
+        self.eventStoragePath = eventStoragePath
+        self.maxPersistedEvents = maxPersistedEvents
+        self.persistenceFlushInterval = persistenceFlushInterval
     }
 }
 
@@ -112,10 +132,12 @@ public actor EventQueue {
     private let onFlush: ([[String: Any]]) async throws -> Void
 
     private var queue: [AnalyticsEvent] = []
+    private var eventIds: [String] = [] // Tracking IDs for persistence
     private var isRunning = false
     private var isFlushing = false
     private var task: Task<Void, Never>?
     private var consecutiveFailures = 0
+    private var persistence: EventPersistence?
 
     /// Creates a new event queue.
     /// - Parameters:
@@ -127,6 +149,15 @@ public actor EventQueue {
     ) {
         self.config = config
         self.onFlush = onFlush
+
+        if config.persistEvents {
+            let storagePath = config.eventStoragePath ?? NSTemporaryDirectory().appending("flagkit-events")
+            self.persistence = EventPersistence(
+                storagePath: storagePath,
+                maxEvents: config.maxPersistedEvents,
+                flushInterval: config.persistenceFlushInterval
+            )
+        }
     }
 
     /// Creates a new event queue with basic parameters.
@@ -143,8 +174,48 @@ public actor EventQueue {
         self.onFlush = onFlush
     }
 
+    /// Creates a new event queue with persistence support.
+    /// - Parameters:
+    ///   - config: Event queue configuration.
+    ///   - persistence: Optional event persistence manager.
+    ///   - onFlush: Callback to send events.
+    public init(
+        config: EventQueueConfig,
+        persistence: EventPersistence?,
+        onFlush: @escaping ([[String: Any]]) async throws -> Void
+    ) {
+        self.config = config
+        self.persistence = persistence
+        self.onFlush = onFlush
+    }
+
     /// Starts the background flush task.
-    public func start() {
+    public func start() async {
+        guard !isRunning else { return }
+
+        // Start persistence if enabled
+        if let persistence = persistence {
+            do {
+                try await persistence.start()
+
+                // Recover any pending events from previous crash
+                let recoveredEvents = try await persistence.recover()
+                for event in recoveredEvents {
+                    queue.append(event)
+                }
+            } catch {
+                // Log error but continue without persistence
+            }
+        }
+
+        isRunning = true
+        task = Task { [weak self] in
+            await self?.flushLoop()
+        }
+    }
+
+    /// Starts the background flush task (non-async for backward compatibility).
+    public func startSync() {
         guard !isRunning else { return }
 
         isRunning = true
@@ -161,6 +232,11 @@ public actor EventQueue {
 
         // Flush any remaining events
         await flush()
+
+        // Stop persistence
+        if let persistence = persistence {
+            await persistence.stop()
+        }
     }
 
     /// Adds an event to the queue.
@@ -171,13 +247,29 @@ public actor EventQueue {
             return
         }
 
+        // Generate event ID for persistence tracking
+        let eventId = UUID().uuidString
+
+        // Persist event before queuing (crash-safe)
+        if let persistence = persistence {
+            do {
+                try await persistence.persist(event, withId: eventId)
+            } catch {
+                // Log error but continue without persistence
+            }
+        }
+
         // Enforce max queue size
         if queue.count >= config.maxQueueSize {
             // Drop oldest event
             queue.removeFirst()
+            if !eventIds.isEmpty {
+                eventIds.removeFirst()
+            }
         }
 
         queue.append(event)
+        eventIds.append(eventId)
 
         // Flush if batch size reached
         if queue.count >= config.batchSize {
@@ -205,24 +297,56 @@ public actor EventQueue {
         defer { isFlushing = false }
 
         let events = queue
+        let ids = eventIds
         queue.removeAll()
+        eventIds.removeAll()
 
         let eventDicts = events.map { $0.toDictionary() }
+
+        // Mark events as sending if persistence is enabled
+        if let persistence = persistence, !ids.isEmpty {
+            do {
+                try await persistence.markSending(ids)
+            } catch {
+                // Log error but continue
+            }
+        }
 
         do {
             try await sendWithRetry(eventDicts)
             consecutiveFailures = 0
+
+            // Mark events as sent if persistence is enabled
+            if let persistence = persistence, !ids.isEmpty {
+                do {
+                    try await persistence.markSent(ids)
+                } catch {
+                    // Log error but continue
+                }
+            }
         } catch {
             // Re-queue failed events (up to max size)
             let requeue = Array(events.prefix(config.maxQueueSize - queue.count))
+            let requeueIds = Array(ids.prefix(config.maxQueueSize - eventIds.count))
             queue = requeue + queue
+            eventIds = requeueIds + eventIds
             consecutiveFailures += 1
+
+            // Revert events to pending status
+            if let persistence = persistence, !ids.isEmpty {
+                do {
+                    try await persistence.markPending(ids)
+                } catch {
+                    // Log error but continue
+                }
+            }
         }
     }
 
     /// Clears all pending events without sending them.
     public func clearQueue() {
         queue.removeAll()
+        eventIds.removeAll()
     }
 
     /// Returns the number of pending events.
