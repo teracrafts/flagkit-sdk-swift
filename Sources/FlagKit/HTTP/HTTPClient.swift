@@ -18,30 +18,55 @@ actor HTTPClient {
     private static let retryMultiplier: Double = 2.0
     private static let jitterFactor: Double = 0.1
 
-    private let apiKey: String
+    private var currentApiKey: String
+    private let primaryApiKey: String
+    private let secondaryApiKey: String?
     private let timeout: TimeInterval
     private let retryAttempts: Int
     private let circuitBreaker: CircuitBreaker
     private let session: URLSession
     private let localPort: Int?
+    private let enableRequestSigning: Bool
+    private var hasFailedOverToSecondary: Bool = false
 
     init(
         apiKey: String,
+        secondaryApiKey: String? = nil,
         timeout: TimeInterval,
         retryAttempts: Int,
         circuitBreaker: CircuitBreaker,
-        localPort: Int? = nil
+        localPort: Int? = nil,
+        enableRequestSigning: Bool = false
     ) {
-        self.apiKey = apiKey
+        self.primaryApiKey = apiKey
+        self.currentApiKey = apiKey
+        self.secondaryApiKey = secondaryApiKey
         self.timeout = timeout
         self.retryAttempts = retryAttempts
         self.circuitBreaker = circuitBreaker
         self.localPort = localPort
+        self.enableRequestSigning = enableRequestSigning
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = timeout
         config.timeoutIntervalForResource = timeout * 2
         self.session = URLSession(configuration: config)
+    }
+
+    /// Returns the currently active API key.
+    var activeApiKey: String {
+        currentApiKey
+    }
+
+    /// Returns whether the client has failed over to the secondary key.
+    var isUsingSecondaryKey: Bool {
+        hasFailedOverToSecondary
+    }
+
+    /// Resets to use the primary API key.
+    func resetToPrimaryKey() {
+        currentApiKey = primaryApiKey
+        hasFailedOverToSecondary = false
     }
 
     /// Makes a GET request.
@@ -79,6 +104,16 @@ actor HTTPClient {
                 let result = try await executeRequest(method, path: path, params: params, body: body)
                 await circuitBreaker.recordSuccess()
                 return result
+            } catch let error as FlagKitError where error.code == .authInvalidKey {
+                // Try failover to secondary key on 401 errors
+                if let secondaryKey = secondaryApiKey, !hasFailedOverToSecondary {
+                    currentApiKey = secondaryKey
+                    hasFailedOverToSecondary = true
+                    // Retry with secondary key without counting this attempt
+                    attempts -= 1
+                    continue
+                }
+                throw error
             } catch let error as FlagKitError where !error.isRecoverable {
                 throw error
             } catch {
@@ -119,11 +154,21 @@ actor HTTPClient {
         request.httpMethod = method.rawValue
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue(apiKey, forHTTPHeaderField: "X-API-Key")
+        request.setValue(currentApiKey, forHTTPHeaderField: "X-API-Key")
         request.setValue("FlagKit-Swift/1.0.0", forHTTPHeaderField: "User-Agent")
 
         if let body = body {
-            request.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let bodyData = try JSONSerialization.data(withJSONObject: body)
+            request.httpBody = bodyData
+
+            // Add request signing headers for POST requests
+            if enableRequestSigning, method == .post {
+                let bodyString = String(data: bodyData, encoding: .utf8) ?? ""
+                let signature = createRequestSignature(body: bodyString, apiKey: currentApiKey)
+                request.setValue(signature.signature, forHTTPHeaderField: "X-Signature")
+                request.setValue(String(signature.timestamp), forHTTPHeaderField: "X-Timestamp")
+                request.setValue(signature.keyId, forHTTPHeaderField: "X-Key-Id")
+            }
         }
 
         let (data, response) = try await session.data(for: request)

@@ -32,6 +32,9 @@ public struct FlagKitOptions: Sendable {
     /// The API key.
     public let apiKey: String
 
+    /// Secondary API key for key rotation. Automatically used on 401 errors.
+    public let secondaryApiKey: String?
+
     /// Polling interval in seconds.
     public let pollingInterval: TimeInterval
 
@@ -71,9 +74,19 @@ public struct FlagKitOptions: Sendable {
     /// Local development server port. When set, uses http://localhost:{port}/api/v1.
     public let localPort: Int?
 
+    /// Strict PII mode: throws SecurityError instead of warning when PII is detected.
+    public let strictPIIMode: Bool
+
+    /// Enable request signing for POST requests using HMAC-SHA256.
+    public let enableRequestSigning: Bool
+
+    /// Enable cache encryption using AES-GCM.
+    public let enableCacheEncryption: Bool
+
     /// Creates new options.
     public init(
         apiKey: String,
+        secondaryApiKey: String? = nil,
         pollingInterval: TimeInterval = defaultPollingInterval,
         cacheTTL: TimeInterval = defaultCacheTTL,
         maxCacheSize: Int = defaultMaxCacheSize,
@@ -86,9 +99,13 @@ public struct FlagKitOptions: Sendable {
         circuitBreakerThreshold: Int = defaultCircuitBreakerThreshold,
         circuitBreakerResetTimeout: TimeInterval = defaultCircuitBreakerResetTimeout,
         bootstrap: [String: Any]? = nil,
-        localPort: Int? = nil
+        localPort: Int? = nil,
+        strictPIIMode: Bool = false,
+        enableRequestSigning: Bool = false,
+        enableCacheEncryption: Bool = false
     ) {
         self.apiKey = apiKey
+        self.secondaryApiKey = secondaryApiKey
         self.pollingInterval = pollingInterval
         self.cacheTTL = cacheTTL
         self.maxCacheSize = maxCacheSize
@@ -102,6 +119,9 @@ public struct FlagKitOptions: Sendable {
         self.circuitBreakerResetTimeout = circuitBreakerResetTimeout
         self.bootstrap = bootstrap
         self.localPort = localPort
+        self.strictPIIMode = strictPIIMode
+        self.enableRequestSigning = enableRequestSigning
+        self.enableCacheEncryption = enableCacheEncryption
     }
 
     /// Validates the options.
@@ -115,6 +135,13 @@ public struct FlagKitOptions: Sendable {
             throw FlagKitError.configError(code: .configInvalidApiKey, message: "Invalid API key format")
         }
 
+        // Validate secondary API key format if provided
+        if let secondaryKey = secondaryApiKey, !secondaryKey.isEmpty {
+            guard validPrefixes.contains(where: { secondaryKey.hasPrefix($0) }) else {
+                throw FlagKitError.configError(code: .configInvalidApiKey, message: "Invalid secondary API key format")
+            }
+        }
+
         guard pollingInterval > 0 else {
             throw FlagKitError.configError(code: .configInvalidPollingInterval, message: "Polling interval must be positive")
         }
@@ -122,6 +149,9 @@ public struct FlagKitOptions: Sendable {
         guard cacheTTL > 0 else {
             throw FlagKitError.configError(code: .configInvalidCacheTtl, message: "Cache TTL must be positive")
         }
+
+        // Validate localPort restriction in production
+        try validateLocalPortRestriction(localPort: localPort)
     }
 }
 
@@ -131,6 +161,7 @@ extension FlagKitOptions {
     /// A builder for creating options.
     public class Builder {
         private var apiKey: String
+        private var secondaryApiKey: String?
         private var pollingInterval: TimeInterval = FlagKitOptions.defaultPollingInterval
         private var cacheTTL: TimeInterval = FlagKitOptions.defaultCacheTTL
         private var maxCacheSize: Int = FlagKitOptions.defaultMaxCacheSize
@@ -144,9 +175,18 @@ extension FlagKitOptions {
         private var circuitBreakerResetTimeout: TimeInterval = FlagKitOptions.defaultCircuitBreakerResetTimeout
         private var bootstrap: [String: Any]?
         private var localPort: Int?
+        private var strictPIIMode: Bool = false
+        private var enableRequestSigning: Bool = false
+        private var enableCacheEncryption: Bool = false
 
         public init(apiKey: String) {
             self.apiKey = apiKey
+        }
+
+        @discardableResult
+        public func secondaryApiKey(_ key: String) -> Builder {
+            self.secondaryApiKey = key
+            return self
         }
 
         @discardableResult
@@ -215,9 +255,28 @@ extension FlagKitOptions {
             return self
         }
 
+        @discardableResult
+        public func strictPIIMode(_ enabled: Bool) -> Builder {
+            self.strictPIIMode = enabled
+            return self
+        }
+
+        @discardableResult
+        public func enableRequestSigning(_ enabled: Bool) -> Builder {
+            self.enableRequestSigning = enabled
+            return self
+        }
+
+        @discardableResult
+        public func enableCacheEncryption(_ enabled: Bool) -> Builder {
+            self.enableCacheEncryption = enabled
+            return self
+        }
+
         public func build() -> FlagKitOptions {
             FlagKitOptions(
                 apiKey: apiKey,
+                secondaryApiKey: secondaryApiKey,
                 pollingInterval: pollingInterval,
                 cacheTTL: cacheTTL,
                 maxCacheSize: maxCacheSize,
@@ -230,7 +289,10 @@ extension FlagKitOptions {
                 circuitBreakerThreshold: circuitBreakerThreshold,
                 circuitBreakerResetTimeout: circuitBreakerResetTimeout,
                 bootstrap: bootstrap,
-                localPort: localPort
+                localPort: localPort,
+                strictPIIMode: strictPIIMode,
+                enableRequestSigning: enableRequestSigning,
+                enableCacheEncryption: enableCacheEncryption
             )
         }
     }

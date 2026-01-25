@@ -32,10 +32,12 @@ public actor FlagKitClient {
 
         self.httpClient = HTTPClient(
             apiKey: options.apiKey,
+            secondaryApiKey: options.secondaryApiKey,
             timeout: options.timeout,
             retryAttempts: options.retryAttempts,
             circuitBreaker: circuitBreaker,
-            localPort: options.localPort
+            localPort: options.localPort,
+            enableRequestSigning: options.enableRequestSigning
         )
 
         self.cache = Cache(

@@ -1,4 +1,5 @@
 import Foundation
+import CryptoKit
 
 // MARK: - Logger Protocol
 
@@ -17,6 +18,37 @@ public extension Logger {
     func error(_ message: String) { error(message, data: nil) }
 }
 
+// MARK: - Security Error
+
+/// Security-related errors for FlagKit SDK.
+public enum SecurityError: Error, Sendable, LocalizedError {
+    /// Local port cannot be used in production environment.
+    case localPortInProduction
+    /// PII detected without privateAttributes (strict mode).
+    case piiDetectedStrictMode(fields: [String])
+    /// Encryption failed.
+    case encryptionFailed(String)
+    /// Decryption failed.
+    case decryptionFailed(String)
+    /// Key derivation failed.
+    case keyDerivationFailed
+
+    public var errorDescription: String? {
+        switch self {
+        case .localPortInProduction:
+            return "[SECURITY_ERROR] Local port cannot be used in production environment (APP_ENV=production)"
+        case .piiDetectedStrictMode(let fields):
+            return "[SECURITY_ERROR] PII detected in strict mode without privateAttributes: \(fields.joined(separator: ", "))"
+        case .encryptionFailed(let reason):
+            return "[SECURITY_ERROR] Encryption failed: \(reason)"
+        case .decryptionFailed(let reason):
+            return "[SECURITY_ERROR] Decryption failed: \(reason)"
+        case .keyDerivationFailed:
+            return "[SECURITY_ERROR] Key derivation failed"
+        }
+    }
+}
+
 // MARK: - Security Configuration
 
 /// Security configuration options for the FlagKit SDK.
@@ -30,15 +62,20 @@ public struct SecurityConfig: Sendable {
     /// Custom PII patterns to detect (in addition to built-in patterns).
     public let additionalPIIPatterns: [String]
 
+    /// Strict PII mode: throws SecurityError instead of warning when PII is detected without privateAttributes.
+    public let strictPIIMode: Bool
+
     /// Creates a new security configuration.
     /// - Parameters:
     ///   - warnOnPotentialPII: Warn about potential PII in context/events.
     ///   - warnOnServerKeyInClient: Warn when server keys are used in client-like environments.
     ///   - additionalPIIPatterns: Custom PII patterns to detect.
+    ///   - strictPIIMode: Throws SecurityError instead of warning when PII is detected.
     public init(
         warnOnPotentialPII: Bool? = nil,
         warnOnServerKeyInClient: Bool = true,
-        additionalPIIPatterns: [String] = []
+        additionalPIIPatterns: [String] = [],
+        strictPIIMode: Bool = false
     ) {
         #if DEBUG
         self.warnOnPotentialPII = warnOnPotentialPII ?? true
@@ -47,6 +84,7 @@ public struct SecurityConfig: Sendable {
         #endif
         self.warnOnServerKeyInClient = warnOnServerKeyInClient
         self.additionalPIIPatterns = additionalPIIPatterns
+        self.strictPIIMode = strictPIIMode
     }
 
     /// Default security configuration.
@@ -286,3 +324,472 @@ internal enum SecurityUtils {
         }
     }
 }
+
+// MARK: - Strict PII Mode
+
+/// PII detection result for strict mode validation.
+public struct PIIDetectionResult: Sendable {
+    /// Whether PII was detected.
+    public let hasPII: Bool
+    /// The fields that contain potential PII.
+    public let fields: [String]
+    /// A descriptive message about the detected PII.
+    public let message: String
+
+    public init(hasPII: Bool, fields: [String], message: String) {
+        self.hasPII = hasPII
+        self.fields = fields
+        self.message = message
+    }
+}
+
+/// Checks for potential PII in data and returns detailed result.
+/// - Parameters:
+///   - data: The data to check for PII.
+///   - dataType: The type of data being checked (context or event).
+///   - additionalPatterns: Additional patterns to check.
+/// - Returns: A PIIDetectionResult with details about detected PII.
+public func checkForPotentialPII(
+    in data: [String: Any]?,
+    dataType: PIIDataType,
+    additionalPatterns: [String] = []
+) -> PIIDetectionResult {
+    guard let data = data else {
+        return PIIDetectionResult(hasPII: false, fields: [], message: "")
+    }
+
+    let piiFields = detectPotentialPII(
+        in: data,
+        additionalPatterns: additionalPatterns
+    )
+
+    guard !piiFields.isEmpty else {
+        return PIIDetectionResult(hasPII: false, fields: [], message: "")
+    }
+
+    let fieldsDescription = piiFields.joined(separator: ", ")
+    let recommendation: String
+
+    switch dataType {
+    case .context:
+        recommendation = "Consider adding these to privateAttributes."
+    case .event:
+        recommendation = "Consider removing sensitive data from events."
+    }
+
+    let message = "[FlagKit Security] Potential PII detected in \(dataType.rawValue) data: \(fieldsDescription). \(recommendation)"
+
+    return PIIDetectionResult(hasPII: true, fields: piiFields, message: message)
+}
+
+/// Validates PII in data, optionally throwing in strict mode.
+/// - Parameters:
+///   - data: The data to check for PII.
+///   - dataType: The type of data being checked.
+///   - privateAttributes: Fields that are marked as private (excluded from PII check).
+///   - strictMode: Whether to throw an error instead of warning.
+///   - logger: Optional logger for warnings.
+///   - additionalPatterns: Additional PII patterns to check.
+/// - Throws: SecurityError.piiDetectedStrictMode if strict mode is enabled and PII is found.
+public func validatePII(
+    in data: [String: Any]?,
+    dataType: PIIDataType,
+    privateAttributes: Set<String> = [],
+    strictMode: Bool = false,
+    logger: Logger? = nil,
+    additionalPatterns: [String] = []
+) throws {
+    guard let data = data else { return }
+
+    // Filter out private attributes from the check
+    let filteredData = data.filter { !privateAttributes.contains($0.key) }
+
+    let result = checkForPotentialPII(
+        in: filteredData,
+        dataType: dataType,
+        additionalPatterns: additionalPatterns
+    )
+
+    guard result.hasPII else { return }
+
+    if strictMode {
+        throw SecurityError.piiDetectedStrictMode(fields: result.fields)
+    } else {
+        logger?.warn(result.message)
+    }
+}
+
+// MARK: - Production Environment Check
+
+/// Checks if the current environment is production based on APP_ENV environment variable.
+/// - Returns: True if APP_ENV is "production".
+public func isProductionEnvironment() -> Bool {
+    ProcessInfo.processInfo.environment["APP_ENV"] == "production"
+}
+
+/// Validates that localPort is not used in production environment.
+/// - Parameter localPort: The local port setting, if any.
+/// - Throws: SecurityError.localPortInProduction if localPort is set in production.
+public func validateLocalPortRestriction(localPort: Int?) throws {
+    guard let _ = localPort else { return }
+
+    if isProductionEnvironment() {
+        throw SecurityError.localPortInProduction
+    }
+}
+
+// MARK: - HMAC-SHA256 Request Signing
+
+/// Gets the first 8 characters of an API key for identification.
+/// This is safe to expose as it doesn't reveal the full key.
+/// - Parameter apiKey: The API key.
+/// - Returns: The key ID (first 8 characters).
+public func getKeyId(_ apiKey: String) -> String {
+    String(apiKey.prefix(8))
+}
+
+/// Generates an HMAC-SHA256 signature for a message.
+/// - Parameters:
+///   - message: The message to sign.
+///   - key: The secret key.
+/// - Returns: The hexadecimal signature string.
+public func generateHMACSHA256(message: String, key: String) -> String {
+    let keyData = Data(key.utf8)
+    let messageData = Data(message.utf8)
+
+    let symmetricKey = SymmetricKey(data: keyData)
+    let signature = HMAC<SHA256>.authenticationCode(for: messageData, using: symmetricKey)
+
+    return signature.map { String(format: "%02x", $0) }.joined()
+}
+
+/// Request signature result containing the signature and timestamp.
+public struct RequestSignature: Sendable {
+    /// The HMAC-SHA256 signature in hexadecimal format.
+    public let signature: String
+    /// The timestamp used in the signature.
+    public let timestamp: Int64
+    /// The key ID (first 8 chars of API key).
+    public let keyId: String
+
+    public init(signature: String, timestamp: Int64, keyId: String) {
+        self.signature = signature
+        self.timestamp = timestamp
+        self.keyId = keyId
+    }
+}
+
+/// Creates a request signature for POST request bodies.
+/// - Parameters:
+///   - body: The request body as a string (usually JSON).
+///   - apiKey: The API key to use for signing.
+///   - timestamp: Optional timestamp (defaults to current time in milliseconds).
+/// - Returns: A RequestSignature containing the signature, timestamp, and key ID.
+public func createRequestSignature(
+    body: String,
+    apiKey: String,
+    timestamp: Int64? = nil
+) -> RequestSignature {
+    let ts = timestamp ?? Int64(Date().timeIntervalSince1970 * 1000)
+    let message = "\(ts).\(body)"
+    let signature = generateHMACSHA256(message: message, key: apiKey)
+
+    return RequestSignature(
+        signature: signature,
+        timestamp: ts,
+        keyId: getKeyId(apiKey)
+    )
+}
+
+/// Signed payload structure for beacon requests.
+public struct SignedPayload<T>: Sendable where T: Sendable {
+    /// The data being signed.
+    public let data: T
+    /// The HMAC-SHA256 signature.
+    public let signature: String
+    /// The timestamp used in the signature.
+    public let timestamp: Int64
+    /// The key ID.
+    public let keyId: String
+
+    public init(data: T, signature: String, timestamp: Int64, keyId: String) {
+        self.data = data
+        self.signature = signature
+        self.timestamp = timestamp
+        self.keyId = keyId
+    }
+}
+
+/// Signs a payload with HMAC-SHA256.
+/// - Parameters:
+///   - data: The data to sign.
+///   - apiKey: The API key.
+///   - timestamp: Optional timestamp.
+/// - Returns: A SignedPayload containing the data and signature.
+/// - Throws: If JSON serialization fails.
+public func signPayload<T>(
+    data: T,
+    apiKey: String,
+    timestamp: Int64? = nil
+) throws -> SignedPayload<T> where T: Encodable & Sendable {
+    let ts = timestamp ?? Int64(Date().timeIntervalSince1970 * 1000)
+    let jsonData = try JSONEncoder().encode(data)
+    guard let payload = String(data: jsonData, encoding: .utf8) else {
+        throw SecurityError.encryptionFailed("Failed to encode payload as UTF-8")
+    }
+
+    let message = "\(ts).\(payload)"
+    let signature = generateHMACSHA256(message: message, key: apiKey)
+
+    return SignedPayload(
+        data: data,
+        signature: signature,
+        timestamp: ts,
+        keyId: getKeyId(apiKey)
+    )
+}
+
+/// Signs a dictionary payload with HMAC-SHA256.
+/// - Parameters:
+///   - data: The dictionary data to sign.
+///   - apiKey: The API key.
+///   - timestamp: Optional timestamp.
+/// - Returns: A SignedPayload containing the data and signature.
+/// - Throws: If JSON serialization fails.
+public func signPayload(
+    data: [String: Any],
+    apiKey: String,
+    timestamp: Int64? = nil
+) throws -> SignedPayload<[String: Any]> {
+    let ts = timestamp ?? Int64(Date().timeIntervalSince1970 * 1000)
+    let jsonData = try JSONSerialization.data(withJSONObject: data, options: .sortedKeys)
+    guard let payload = String(data: jsonData, encoding: .utf8) else {
+        throw SecurityError.encryptionFailed("Failed to encode payload as UTF-8")
+    }
+
+    let message = "\(ts).\(payload)"
+    let signature = generateHMACSHA256(message: message, key: apiKey)
+
+    return SignedPayload(
+        data: data,
+        signature: signature,
+        timestamp: ts,
+        keyId: getKeyId(apiKey)
+    )
+}
+
+/// Verifies a signed payload.
+/// - Parameters:
+///   - signedPayload: The signed payload to verify.
+///   - apiKey: The API key.
+///   - maxAgeMs: Maximum age of the signature in milliseconds (default: 5 minutes).
+/// - Returns: True if the signature is valid.
+public func verifySignedPayload<T>(
+    _ signedPayload: SignedPayload<T>,
+    apiKey: String,
+    maxAgeMs: Int64 = 300_000
+) -> Bool where T: Encodable & Sendable {
+    // Check timestamp age
+    let currentTime = Int64(Date().timeIntervalSince1970 * 1000)
+    let age = currentTime - signedPayload.timestamp
+    if age > maxAgeMs || age < 0 {
+        return false
+    }
+
+    // Verify key ID matches
+    if signedPayload.keyId != getKeyId(apiKey) {
+        return false
+    }
+
+    // Verify signature
+    guard let jsonData = try? JSONEncoder().encode(signedPayload.data),
+          let payload = String(data: jsonData, encoding: .utf8) else {
+        return false
+    }
+
+    let message = "\(signedPayload.timestamp).\(payload)"
+    let expectedSignature = generateHMACSHA256(message: message, key: apiKey)
+
+    return signedPayload.signature == expectedSignature
+}
+
+/// Verifies a signed dictionary payload.
+/// - Parameters:
+///   - signedPayload: The signed payload to verify.
+///   - apiKey: The API key.
+///   - maxAgeMs: Maximum age of the signature in milliseconds.
+/// - Returns: True if the signature is valid.
+public func verifySignedPayload(
+    _ signedPayload: SignedPayload<[String: Any]>,
+    apiKey: String,
+    maxAgeMs: Int64 = 300_000
+) -> Bool {
+    // Check timestamp age
+    let currentTime = Int64(Date().timeIntervalSince1970 * 1000)
+    let age = currentTime - signedPayload.timestamp
+    if age > maxAgeMs || age < 0 {
+        return false
+    }
+
+    // Verify key ID matches
+    if signedPayload.keyId != getKeyId(apiKey) {
+        return false
+    }
+
+    // Verify signature
+    guard let jsonData = try? JSONSerialization.data(withJSONObject: signedPayload.data, options: .sortedKeys),
+          let payload = String(data: jsonData, encoding: .utf8) else {
+        return false
+    }
+
+    let message = "\(signedPayload.timestamp).\(payload)"
+    let expectedSignature = generateHMACSHA256(message: message, key: apiKey)
+
+    return signedPayload.signature == expectedSignature
+}
+
+// MARK: - Cache Encryption (AES-GCM with PBKDF2)
+
+/// Encryption utilities for secure cache storage.
+public enum CacheEncryption {
+    /// Default salt for PBKDF2 key derivation.
+    public static let defaultSalt = "FlagKit-Cache-Encryption-Salt-v1"
+    /// Default iteration count for PBKDF2.
+    public static let defaultIterations = 100_000
+
+    /// Derives an encryption key from an API key using PBKDF2.
+    /// - Parameters:
+    ///   - apiKey: The API key to derive from.
+    ///   - salt: Optional custom salt (defaults to SDK-specific salt).
+    ///   - iterations: Number of PBKDF2 iterations (default: 100,000).
+    /// - Returns: A SymmetricKey suitable for AES-GCM encryption.
+    /// - Throws: SecurityError.keyDerivationFailed if derivation fails.
+    public static func deriveKey(
+        from apiKey: String,
+        salt: String? = nil,
+        iterations: Int = defaultIterations
+    ) throws -> SymmetricKey {
+        let passwordData = Data(apiKey.utf8)
+        let saltData = Data((salt ?? defaultSalt).utf8)
+
+        // Use SHA256-based PBKDF2 to derive a 256-bit key
+        var derivedKeyData = Data(count: 32) // 256 bits for AES-256
+        let derivationStatus = derivedKeyData.withUnsafeMutableBytes { derivedKeyBytes in
+            passwordData.withUnsafeBytes { passwordBytes in
+                saltData.withUnsafeBytes { saltBytes in
+                    CCKeyDerivationPBKDF(
+                        CCPBKDFAlgorithm(kCCPBKDF2),
+                        passwordBytes.baseAddress?.assumingMemoryBound(to: Int8.self),
+                        passwordData.count,
+                        saltBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                        saltData.count,
+                        CCPseudoRandomAlgorithm(kCCPRFHmacAlgSHA256),
+                        UInt32(iterations),
+                        derivedKeyBytes.baseAddress?.assumingMemoryBound(to: UInt8.self),
+                        32
+                    )
+                }
+            }
+        }
+
+        guard derivationStatus == kCCSuccess else {
+            throw SecurityError.keyDerivationFailed
+        }
+
+        return SymmetricKey(data: derivedKeyData)
+    }
+
+    /// Encrypts data using AES-GCM.
+    /// - Parameters:
+    ///   - data: The data to encrypt.
+    ///   - key: The symmetric key for encryption.
+    /// - Returns: The encrypted data (nonce + ciphertext + tag).
+    /// - Throws: SecurityError.encryptionFailed if encryption fails.
+    public static func encrypt(_ data: Data, with key: SymmetricKey) throws -> Data {
+        do {
+            let sealedBox = try AES.GCM.seal(data, using: key)
+            guard let combined = sealedBox.combined else {
+                throw SecurityError.encryptionFailed("Failed to combine sealed box")
+            }
+            return combined
+        } catch let error as SecurityError {
+            throw error
+        } catch {
+            throw SecurityError.encryptionFailed(error.localizedDescription)
+        }
+    }
+
+    /// Decrypts data using AES-GCM.
+    /// - Parameters:
+    ///   - data: The encrypted data (nonce + ciphertext + tag).
+    ///   - key: The symmetric key for decryption.
+    /// - Returns: The decrypted data.
+    /// - Throws: SecurityError.decryptionFailed if decryption fails.
+    public static func decrypt(_ data: Data, with key: SymmetricKey) throws -> Data {
+        do {
+            let sealedBox = try AES.GCM.SealedBox(combined: data)
+            return try AES.GCM.open(sealedBox, using: key)
+        } catch {
+            throw SecurityError.decryptionFailed(error.localizedDescription)
+        }
+    }
+
+    /// Encrypts a string using AES-GCM.
+    /// - Parameters:
+    ///   - string: The string to encrypt.
+    ///   - key: The symmetric key for encryption.
+    /// - Returns: The encrypted data as base64 string.
+    /// - Throws: SecurityError.encryptionFailed if encryption fails.
+    public static func encryptString(_ string: String, with key: SymmetricKey) throws -> String {
+        let data = Data(string.utf8)
+        let encrypted = try encrypt(data, with: key)
+        return encrypted.base64EncodedString()
+    }
+
+    /// Decrypts a base64-encoded encrypted string.
+    /// - Parameters:
+    ///   - base64String: The base64-encoded encrypted data.
+    ///   - key: The symmetric key for decryption.
+    /// - Returns: The decrypted string.
+    /// - Throws: SecurityError.decryptionFailed if decryption fails.
+    public static func decryptString(_ base64String: String, with key: SymmetricKey) throws -> String {
+        guard let data = Data(base64Encoded: base64String) else {
+            throw SecurityError.decryptionFailed("Invalid base64 string")
+        }
+        let decrypted = try decrypt(data, with: key)
+        guard let string = String(data: decrypted, encoding: .utf8) else {
+            throw SecurityError.decryptionFailed("Invalid UTF-8 data")
+        }
+        return string
+    }
+
+    /// Encrypts JSON-serializable data.
+    /// - Parameters:
+    ///   - value: The value to encrypt (must be Encodable).
+    ///   - key: The symmetric key for encryption.
+    /// - Returns: The encrypted data as base64 string.
+    /// - Throws: SecurityError if encryption fails.
+    public static func encryptJSON<T: Encodable>(_ value: T, with key: SymmetricKey) throws -> String {
+        let jsonData = try JSONEncoder().encode(value)
+        let encrypted = try encrypt(jsonData, with: key)
+        return encrypted.base64EncodedString()
+    }
+
+    /// Decrypts JSON data.
+    /// - Parameters:
+    ///   - base64String: The base64-encoded encrypted data.
+    ///   - type: The type to decode to.
+    ///   - key: The symmetric key for decryption.
+    /// - Returns: The decrypted and decoded value.
+    /// - Throws: SecurityError if decryption or decoding fails.
+    public static func decryptJSON<T: Decodable>(_ base64String: String, as type: T.Type, with key: SymmetricKey) throws -> T {
+        guard let data = Data(base64Encoded: base64String) else {
+            throw SecurityError.decryptionFailed("Invalid base64 string")
+        }
+        let decrypted = try decrypt(data, with: key)
+        return try JSONDecoder().decode(type, from: decrypted)
+    }
+}
+
+// Import CommonCrypto for PBKDF2
+import CommonCrypto
