@@ -174,6 +174,9 @@ public actor FlagKitClient {
     ///   - context: Optional per-evaluation context.
     /// - Returns: The evaluation result.
     public func evaluate(key: String, defaultValue: FlagValue, context override: EvaluationContext? = nil) async -> EvaluationResult {
+        // Apply evaluation jitter at the start to protect against cache timing attacks
+        applyEvaluationJitter()
+
         let effectiveContext = await contextManager.resolveContext(with: override)
 
         // Check cache first
@@ -421,6 +424,15 @@ public actor FlagKitClient {
         isReady = true
         readyContinuation?.resume()
         readyContinuation = nil
+    }
+
+    /// Applies evaluation jitter to protect against cache timing attacks.
+    /// When enabled, introduces a random delay before evaluation to make timing analysis difficult.
+    private func applyEvaluationJitter() {
+        guard options.evaluationJitter.enabled else { return }
+
+        let jitterMs = Int.random(in: options.evaluationJitter.minMs...options.evaluationJitter.maxMs)
+        Thread.sleep(forTimeInterval: Double(jitterMs) / 1000.0)
     }
 
     private func loadBootstrap(_ bootstrap: [String: Any]) async {

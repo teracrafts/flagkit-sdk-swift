@@ -1,5 +1,28 @@
 import Foundation
 
+/// Configuration for evaluation jitter to protect against cache timing attacks.
+public struct EvaluationJitterConfig: Sendable {
+    /// Whether evaluation jitter is enabled.
+    public let enabled: Bool
+
+    /// Minimum jitter delay in milliseconds.
+    public let minMs: Int
+
+    /// Maximum jitter delay in milliseconds.
+    public let maxMs: Int
+
+    /// Creates a new evaluation jitter configuration.
+    /// - Parameters:
+    ///   - enabled: Whether jitter is enabled (default: false).
+    ///   - minMs: Minimum jitter delay in milliseconds (default: 5).
+    ///   - maxMs: Maximum jitter delay in milliseconds (default: 15).
+    public init(enabled: Bool = false, minMs: Int = 5, maxMs: Int = 15) {
+        self.enabled = enabled
+        self.minMs = minMs
+        self.maxMs = maxMs
+    }
+}
+
 /// Configuration options for the FlagKit SDK.
 public struct FlagKitOptions: Sendable {
     /// Default polling interval in seconds.
@@ -101,6 +124,9 @@ public struct FlagKitOptions: Sendable {
     /// Interval between disk flushes in seconds.
     public let persistenceFlushInterval: TimeInterval
 
+    /// Evaluation jitter configuration for cache timing attack protection.
+    public let evaluationJitter: EvaluationJitterConfig
+
     /// Creates new options.
     public init(
         apiKey: String,
@@ -124,7 +150,8 @@ public struct FlagKitOptions: Sendable {
         persistEvents: Bool = false,
         eventStoragePath: String? = nil,
         maxPersistedEvents: Int = defaultMaxPersistedEvents,
-        persistenceFlushInterval: TimeInterval = defaultPersistenceFlushInterval
+        persistenceFlushInterval: TimeInterval = defaultPersistenceFlushInterval,
+        evaluationJitter: EvaluationJitterConfig = EvaluationJitterConfig()
     ) {
         self.apiKey = apiKey
         self.secondaryApiKey = secondaryApiKey
@@ -148,6 +175,7 @@ public struct FlagKitOptions: Sendable {
         self.eventStoragePath = eventStoragePath
         self.maxPersistedEvents = maxPersistedEvents
         self.persistenceFlushInterval = persistenceFlushInterval
+        self.evaluationJitter = evaluationJitter
     }
 
     /// Validates the options.
@@ -208,6 +236,7 @@ extension FlagKitOptions {
         private var eventStoragePath: String?
         private var maxPersistedEvents: Int = FlagKitOptions.defaultMaxPersistedEvents
         private var persistenceFlushInterval: TimeInterval = FlagKitOptions.defaultPersistenceFlushInterval
+        private var evaluationJitter: EvaluationJitterConfig = EvaluationJitterConfig()
 
         public init(apiKey: String) {
             self.apiKey = apiKey
@@ -327,6 +356,12 @@ extension FlagKitOptions {
             return self
         }
 
+        @discardableResult
+        public func evaluationJitter(_ config: EvaluationJitterConfig) -> Builder {
+            self.evaluationJitter = config
+            return self
+        }
+
         public func build() -> FlagKitOptions {
             FlagKitOptions(
                 apiKey: apiKey,
@@ -350,7 +385,8 @@ extension FlagKitOptions {
                 persistEvents: persistEvents,
                 eventStoragePath: eventStoragePath,
                 maxPersistedEvents: maxPersistedEvents,
-                persistenceFlushInterval: persistenceFlushInterval
+                persistenceFlushInterval: persistenceFlushInterval,
+                evaluationJitter: evaluationJitter
             )
         }
     }
