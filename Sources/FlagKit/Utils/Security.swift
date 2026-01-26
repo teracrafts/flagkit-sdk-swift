@@ -32,6 +32,8 @@ public enum SecurityError: Error, Sendable, LocalizedError {
     case decryptionFailed(String)
     /// Key derivation failed.
     case keyDerivationFailed
+    /// Bootstrap verification failed.
+    case bootstrapVerificationFailed(String)
 
     public var errorDescription: String? {
         switch self {
@@ -45,6 +47,8 @@ public enum SecurityError: Error, Sendable, LocalizedError {
             return "[SECURITY_ERROR] Decryption failed: \(reason)"
         case .keyDerivationFailed:
             return "[SECURITY_ERROR] Key derivation failed"
+        case .bootstrapVerificationFailed(let reason):
+            return "[SECURITY_ERROR] Bootstrap verification failed: \(reason)"
         }
     }
 }
@@ -793,3 +797,124 @@ public enum CacheEncryption {
 
 // Import CommonCrypto for PBKDF2
 import CommonCrypto
+
+// MARK: - Bootstrap Signature Verification
+
+/// Canonicalizes an object for consistent signature generation.
+/// Produces a deterministic string representation by sorting keys at all levels.
+/// - Parameter obj: The dictionary to canonicalize.
+/// - Returns: A canonical JSON string representation.
+public func canonicalizeObject(_ obj: [String: Any]) -> String {
+    do {
+        let data = try JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])
+        return String(data: data, encoding: .utf8) ?? "{}"
+    } catch {
+        return "{}"
+    }
+}
+
+/// Performs constant-time comparison of two strings to prevent timing attacks.
+/// - Parameters:
+///   - a: First string.
+///   - b: Second string.
+/// - Returns: True if strings are equal.
+public func constantTimeCompare(_ a: String, _ b: String) -> Bool {
+    let aBytes = Array(a.utf8)
+    let bBytes = Array(b.utf8)
+
+    // Always compare both strings fully to prevent timing attacks
+    guard aBytes.count == bBytes.count else {
+        // Still do a comparison to maintain constant time even on length mismatch
+        var result: UInt8 = 1
+        for i in 0..<max(aBytes.count, bBytes.count) {
+            let aVal = i < aBytes.count ? aBytes[i] : 0
+            let bVal = i < bBytes.count ? bBytes[i] : 0
+            result |= aVal ^ bVal
+        }
+        return false
+    }
+
+    var result: UInt8 = 0
+    for i in 0..<aBytes.count {
+        result |= aBytes[i] ^ bBytes[i]
+    }
+    return result == 0
+}
+
+/// Verifies the signature of bootstrap data.
+/// - Parameters:
+///   - bootstrap: The bootstrap configuration containing flags and optional signature.
+///   - apiKey: The API key used to generate the signature.
+///   - config: The verification configuration.
+/// - Returns: A verification result indicating success or failure.
+public func verifyBootstrapSignature(
+    bootstrap: BootstrapConfig,
+    apiKey: String,
+    config: BootstrapVerificationConfig
+) -> BootstrapVerificationResult {
+    // If verification is disabled, always succeed
+    guard config.enabled else {
+        return .success
+    }
+
+    // If no signature provided, verification fails
+    guard let signature = bootstrap.signature else {
+        return .failure("No signature provided for bootstrap verification")
+    }
+
+    // If timestamp is provided, check freshness
+    if let timestamp = bootstrap.timestamp {
+        let currentTime = Int64(Date().timeIntervalSince1970 * 1000)
+        let age = currentTime - timestamp
+
+        // Check if timestamp is in the future (allow 60 seconds of clock skew)
+        if age < -60_000 {
+            return .failure("Bootstrap timestamp is in the future")
+        }
+
+        // Check if bootstrap data is too old
+        if age > config.maxAge {
+            return .failure("Bootstrap data has expired (age: \(age)ms, maxAge: \(config.maxAge)ms)")
+        }
+    }
+
+    // Canonicalize the flags object
+    let canonicalFlags = canonicalizeObject(bootstrap.flags)
+
+    // Build the message to verify: timestamp.flags (if timestamp present) or just flags
+    let message: String
+    if let timestamp = bootstrap.timestamp {
+        message = "\(timestamp).\(canonicalFlags)"
+    } else {
+        message = canonicalFlags
+    }
+
+    // Generate expected signature
+    let expectedSignature = generateHMACSHA256(message: message, key: apiKey)
+
+    // Perform constant-time comparison
+    guard constantTimeCompare(signature, expectedSignature) else {
+        return .failure("Invalid bootstrap signature")
+    }
+
+    return .success
+}
+
+/// Creates a signed bootstrap configuration.
+/// - Parameters:
+///   - flags: The flag data to bootstrap.
+///   - apiKey: The API key to use for signing.
+///   - timestamp: Optional timestamp (defaults to current time).
+/// - Returns: A signed BootstrapConfig.
+public func createSignedBootstrap(
+    flags: [String: Any],
+    apiKey: String,
+    timestamp: Int64? = nil
+) -> BootstrapConfig {
+    let ts = timestamp ?? Int64(Date().timeIntervalSince1970 * 1000)
+    let canonicalFlags = canonicalizeObject(flags)
+    let message = "\(ts).\(canonicalFlags)"
+    let signature = generateHMACSHA256(message: message, key: apiKey)
+
+    return BootstrapConfig(flags: flags, signature: signature, timestamp: ts)
+}

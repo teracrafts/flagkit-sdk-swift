@@ -1,5 +1,92 @@
 import Foundation
 
+// MARK: - Bootstrap Configuration
+
+/// Bootstrap configuration with optional signature verification.
+public struct BootstrapConfig: @unchecked Sendable {
+    /// The flag data to bootstrap.
+    public let flags: [String: Any]
+
+    /// Optional HMAC-SHA256 signature for verification.
+    public let signature: String?
+
+    /// Optional timestamp (milliseconds since epoch) for freshness verification.
+    public let timestamp: Int64?
+
+    /// Creates a new bootstrap configuration.
+    /// - Parameters:
+    ///   - flags: The flag data to bootstrap.
+    ///   - signature: Optional HMAC-SHA256 signature for verification.
+    ///   - timestamp: Optional timestamp for freshness verification.
+    public init(flags: [String: Any], signature: String? = nil, timestamp: Int64? = nil) {
+        self.flags = flags
+        self.signature = signature
+        self.timestamp = timestamp
+    }
+}
+
+/// Configuration for bootstrap signature verification.
+public struct BootstrapVerificationConfig: Sendable {
+    /// Whether verification is enabled.
+    public let enabled: Bool
+
+    /// Maximum age of bootstrap data in milliseconds (default: 24 hours).
+    public let maxAge: Int64
+
+    /// Action to take on verification failure: "warn", "error", or "ignore".
+    public let onFailure: BootstrapVerificationFailureAction
+
+    /// Creates a new bootstrap verification configuration.
+    /// - Parameters:
+    ///   - enabled: Whether verification is enabled (default: true).
+    ///   - maxAge: Maximum age in milliseconds (default: 86400000 = 24 hours).
+    ///   - onFailure: Action on failure (default: .warn).
+    public init(
+        enabled: Bool = true,
+        maxAge: Int64 = 86_400_000,
+        onFailure: BootstrapVerificationFailureAction = .warn
+    ) {
+        self.enabled = enabled
+        self.maxAge = maxAge
+        self.onFailure = onFailure
+    }
+}
+
+/// Action to take when bootstrap verification fails.
+public enum BootstrapVerificationFailureAction: String, Sendable {
+    /// Log a warning but continue loading bootstrap data.
+    case warn
+    /// Throw an error and reject the bootstrap data.
+    case error
+    /// Silently ignore the failure and load bootstrap data anyway.
+    case ignore
+}
+
+/// Result of bootstrap verification.
+public struct BootstrapVerificationResult: Sendable {
+    /// Whether the verification passed.
+    public let valid: Bool
+
+    /// Error message if verification failed.
+    public let error: String?
+
+    /// Creates a successful verification result.
+    public static let success = BootstrapVerificationResult(valid: true, error: nil)
+
+    /// Creates a failed verification result.
+    /// - Parameter error: The error message.
+    public static func failure(_ error: String) -> BootstrapVerificationResult {
+        BootstrapVerificationResult(valid: false, error: error)
+    }
+
+    private init(valid: Bool, error: String?) {
+        self.valid = valid
+        self.error = error
+    }
+}
+
+// MARK: - Evaluation Jitter Configuration
+
 /// Configuration for evaluation jitter to protect against cache timing attacks.
 public struct EvaluationJitterConfig: Sendable {
     /// Whether evaluation jitter is enabled.
@@ -127,6 +214,9 @@ public struct FlagKitOptions: Sendable {
     /// Evaluation jitter configuration for cache timing attack protection.
     public let evaluationJitter: EvaluationJitterConfig
 
+    /// Bootstrap verification configuration for signature and freshness validation.
+    public let bootstrapVerification: BootstrapVerificationConfig
+
     /// Creates new options.
     public init(
         apiKey: String,
@@ -151,7 +241,8 @@ public struct FlagKitOptions: Sendable {
         eventStoragePath: String? = nil,
         maxPersistedEvents: Int = defaultMaxPersistedEvents,
         persistenceFlushInterval: TimeInterval = defaultPersistenceFlushInterval,
-        evaluationJitter: EvaluationJitterConfig = EvaluationJitterConfig()
+        evaluationJitter: EvaluationJitterConfig = EvaluationJitterConfig(),
+        bootstrapVerification: BootstrapVerificationConfig = BootstrapVerificationConfig(enabled: false)
     ) {
         self.apiKey = apiKey
         self.secondaryApiKey = secondaryApiKey
@@ -176,6 +267,7 @@ public struct FlagKitOptions: Sendable {
         self.maxPersistedEvents = maxPersistedEvents
         self.persistenceFlushInterval = persistenceFlushInterval
         self.evaluationJitter = evaluationJitter
+        self.bootstrapVerification = bootstrapVerification
     }
 
     /// Validates the options.
@@ -237,6 +329,7 @@ extension FlagKitOptions {
         private var maxPersistedEvents: Int = FlagKitOptions.defaultMaxPersistedEvents
         private var persistenceFlushInterval: TimeInterval = FlagKitOptions.defaultPersistenceFlushInterval
         private var evaluationJitter: EvaluationJitterConfig = EvaluationJitterConfig()
+        private var bootstrapVerification: BootstrapVerificationConfig = BootstrapVerificationConfig(enabled: false)
 
         public init(apiKey: String) {
             self.apiKey = apiKey
@@ -362,6 +455,12 @@ extension FlagKitOptions {
             return self
         }
 
+        @discardableResult
+        public func bootstrapVerification(_ config: BootstrapVerificationConfig) -> Builder {
+            self.bootstrapVerification = config
+            return self
+        }
+
         public func build() -> FlagKitOptions {
             FlagKitOptions(
                 apiKey: apiKey,
@@ -386,7 +485,8 @@ extension FlagKitOptions {
                 eventStoragePath: eventStoragePath,
                 maxPersistedEvents: maxPersistedEvents,
                 persistenceFlushInterval: persistenceFlushInterval,
-                evaluationJitter: evaluationJitter
+                evaluationJitter: evaluationJitter,
+                bootstrapVerification: bootstrapVerification
             )
         }
     }

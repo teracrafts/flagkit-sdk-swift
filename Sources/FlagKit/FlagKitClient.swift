@@ -72,8 +72,15 @@ public actor FlagKitClient {
             )
         }
 
-        if let bootstrap = options.bootstrap {
-            await loadBootstrap(bootstrap)
+        // Load bootstrap data if provided
+        do {
+            try await loadBootstrapData()
+        } catch {
+            // Handle bootstrap verification failure according to config
+            if case .error = options.bootstrapVerification.onFailure {
+                throw error
+            }
+            // For warn and ignore modes, we log or silently continue
         }
 
         do {
@@ -435,8 +442,74 @@ public actor FlagKitClient {
         Thread.sleep(forTimeInterval: Double(jitterMs) / 1000.0)
     }
 
+    /// Loads bootstrap data, handling both BootstrapConfig and legacy [String: Any] formats.
+    private func loadBootstrapData() async throws {
+        guard let bootstrap = options.bootstrap else { return }
+
+        // Check if bootstrap data has verification metadata (signature/timestamp)
+        // This indicates it might be a serialized BootstrapConfig
+        let signature = bootstrap["_signature"] as? String
+        let timestamp = bootstrap["_timestamp"] as? Int64
+        let flagsData = bootstrap["flags"] ?? bootstrap
+
+        // If we have verification data and verification is enabled, verify the signature
+        if options.bootstrapVerification.enabled {
+            if signature != nil || timestamp != nil {
+                // Create a BootstrapConfig from the parsed data
+                var flagsDict: [String: Any] = [:]
+                if let flags = flagsData as? [[String: Any]] {
+                    flagsDict["flags"] = flags
+                } else if let flags = flagsData as? [String: Any] {
+                    flagsDict = flags
+                }
+
+                let bootstrapConfig = BootstrapConfig(
+                    flags: flagsDict,
+                    signature: signature,
+                    timestamp: timestamp
+                )
+
+                let result = verifyBootstrapSignature(
+                    bootstrap: bootstrapConfig,
+                    apiKey: options.apiKey,
+                    config: options.bootstrapVerification
+                )
+
+                if !result.valid {
+                    let errorMessage = result.error ?? "Unknown verification error"
+
+                    switch options.bootstrapVerification.onFailure {
+                    case .error:
+                        throw SecurityError.bootstrapVerificationFailed(errorMessage)
+                    case .warn:
+                        print("[FlagKit Warning] Bootstrap verification failed: \(errorMessage)")
+                    case .ignore:
+                        break
+                    }
+                }
+            } else if options.bootstrapVerification.onFailure == .error {
+                // Verification enabled but no signature - this is an error in strict mode
+                throw SecurityError.bootstrapVerificationFailed("No signature provided for bootstrap verification")
+            } else if options.bootstrapVerification.onFailure == .warn {
+                print("[FlagKit Warning] Bootstrap data has no signature for verification")
+            }
+        }
+
+        // Load the flags into cache
+        await loadBootstrap(bootstrap)
+    }
+
     private func loadBootstrap(_ bootstrap: [String: Any]) async {
-        guard let flags = bootstrap["flags"] as? [[String: Any]] else { return }
+        // Try to get flags from "flags" key or use the entire object
+        let flagsSource: [[String: Any]]?
+        if let flags = bootstrap["flags"] as? [[String: Any]] {
+            flagsSource = flags
+        } else {
+            // Legacy format: try to interpret as direct flag data
+            flagsSource = nil
+        }
+
+        guard let flags = flagsSource else { return }
 
         for flagData in flags {
             if let flagState = try? decodeFlagState(from: flagData) {
