@@ -217,6 +217,9 @@ public struct FlagKitOptions: Sendable {
     /// Bootstrap verification configuration for signature and freshness validation.
     public let bootstrapVerification: BootstrapVerificationConfig
 
+    /// Error sanitization configuration to remove sensitive information from error messages.
+    public let errorSanitization: ErrorSanitizationConfig
+
     /// Creates new options.
     public init(
         apiKey: String,
@@ -242,7 +245,8 @@ public struct FlagKitOptions: Sendable {
         maxPersistedEvents: Int = defaultMaxPersistedEvents,
         persistenceFlushInterval: TimeInterval = defaultPersistenceFlushInterval,
         evaluationJitter: EvaluationJitterConfig = EvaluationJitterConfig(),
-        bootstrapVerification: BootstrapVerificationConfig = BootstrapVerificationConfig(enabled: false)
+        bootstrapVerification: BootstrapVerificationConfig = BootstrapVerificationConfig(enabled: false),
+        errorSanitization: ErrorSanitizationConfig = ErrorSanitizationConfig()
     ) {
         self.apiKey = apiKey
         self.secondaryApiKey = secondaryApiKey
@@ -268,6 +272,7 @@ public struct FlagKitOptions: Sendable {
         self.persistenceFlushInterval = persistenceFlushInterval
         self.evaluationJitter = evaluationJitter
         self.bootstrapVerification = bootstrapVerification
+        self.errorSanitization = errorSanitization
     }
 
     /// Validates the options.
@@ -330,6 +335,7 @@ extension FlagKitOptions {
         private var persistenceFlushInterval: TimeInterval = FlagKitOptions.defaultPersistenceFlushInterval
         private var evaluationJitter: EvaluationJitterConfig = EvaluationJitterConfig()
         private var bootstrapVerification: BootstrapVerificationConfig = BootstrapVerificationConfig(enabled: false)
+        private var errorSanitization: ErrorSanitizationConfig = ErrorSanitizationConfig()
 
         public init(apiKey: String) {
             self.apiKey = apiKey
@@ -461,6 +467,12 @@ extension FlagKitOptions {
             return self
         }
 
+        @discardableResult
+        public func errorSanitization(_ config: ErrorSanitizationConfig) -> Builder {
+            self.errorSanitization = config
+            return self
+        }
+
         public func build() -> FlagKitOptions {
             FlagKitOptions(
                 apiKey: apiKey,
@@ -486,7 +498,8 @@ extension FlagKitOptions {
                 maxPersistedEvents: maxPersistedEvents,
                 persistenceFlushInterval: persistenceFlushInterval,
                 evaluationJitter: evaluationJitter,
-                bootstrapVerification: bootstrapVerification
+                bootstrapVerification: bootstrapVerification,
+                errorSanitization: errorSanitization
             )
         }
     }

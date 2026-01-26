@@ -1,12 +1,23 @@
 import Foundation
 
+/// Global error sanitization configuration for FlagKit errors.
+/// Set this before creating any FlagKitError instances to enable sanitization.
+public enum FlagKitErrorConfig {
+    /// The error sanitization configuration.
+    /// Defaults to enabled.
+    public static var sanitization: ErrorSanitizationConfig = .default
+}
+
 /// Error type for FlagKit SDK operations.
 public struct FlagKitError: Error, Sendable {
     /// The error code.
     public let code: ErrorCode
 
-    /// The error message.
+    /// The error message (sanitized if sanitization is enabled).
     public let message: String
+
+    /// The original error message before sanitization (only available if preserveOriginal is enabled).
+    public let originalMessage: String?
 
     /// The underlying cause, if any.
     public let cause: Error?
@@ -21,8 +32,31 @@ public struct FlagKitError: Error, Sendable {
     ///   - cause: The underlying cause.
     public init(code: ErrorCode, message: String, cause: Error? = nil) {
         self.code = code
-        self.message = message
         self.cause = cause
+
+        let sanitized = ErrorSanitizer.shared.sanitize(message, config: FlagKitErrorConfig.sanitization)
+        self.message = sanitized.sanitized
+        self.originalMessage = sanitized.original
+    }
+
+    /// Creates a new FlagKit error with explicit sanitization control.
+    /// - Parameters:
+    ///   - code: The error code.
+    ///   - message: The error message.
+    ///   - cause: The underlying cause.
+    ///   - sanitize: Whether to sanitize the message.
+    public init(code: ErrorCode, message: String, cause: Error? = nil, sanitize: Bool) {
+        self.code = code
+        self.cause = cause
+
+        if sanitize {
+            let sanitized = ErrorSanitizer.shared.sanitize(message, config: FlagKitErrorConfig.sanitization)
+            self.message = sanitized.sanitized
+            self.originalMessage = sanitized.original
+        } else {
+            self.message = message
+            self.originalMessage = nil
+        }
     }
 
     /// Whether this error is recoverable.
