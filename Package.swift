@@ -26,6 +26,11 @@ let package = Package(
             name: "FlagKitTests",
             dependencies: ["FlagKit"],
             path: "Tests/FlagKitTests"
+        ),
+        .executableTarget(
+            name: "sdk-lab",
+            dependencies: ["FlagKit"],
+            path: "Sources/SdkLab"
         )
     ]
 )
