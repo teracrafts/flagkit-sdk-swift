@@ -203,6 +203,8 @@ actor HTTPClient {
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(currentApiKey, forHTTPHeaderField: "X-API-Key")
         request.setValue("FlagKit-Swift/1.0.0", forHTTPHeaderField: "User-Agent")
+        request.setValue("1.0.0", forHTTPHeaderField: "X-FlagKit-SDK-Version")
+        request.setValue("swift", forHTTPHeaderField: "X-FlagKit-SDK-Language")
 
         if let body = body {
             let bodyData = try JSONSerialization.data(withJSONObject: body)
