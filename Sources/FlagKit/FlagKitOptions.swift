@@ -111,7 +111,7 @@ public struct EvaluationJitterConfig: Sendable {
 }
 
 /// Configuration options for the FlagKit SDK.
-public struct FlagKitOptions: Sendable {
+public struct FlagKitOptions: @unchecked Sendable {
     /// Default polling interval in seconds.
     public static let defaultPollingInterval: TimeInterval = 30
 
@@ -220,6 +220,15 @@ public struct FlagKitOptions: Sendable {
     /// Error sanitization configuration to remove sensitive information from error messages.
     public let errorSanitization: ErrorSanitizationConfig
 
+    /// Callback for usage metrics updates from API responses.
+    public let onUsageUpdate: UsageUpdateCallback?
+
+    /// Callback when subscription error occurs during streaming (e.g., suspended).
+    public let onSubscriptionError: SubscriptionErrorCallback?
+
+    /// Callback when connection limit is reached during streaming.
+    public let onConnectionLimitError: ConnectionLimitErrorCallback?
+
     /// Creates new options.
     public init(
         apiKey: String,
@@ -246,7 +255,10 @@ public struct FlagKitOptions: Sendable {
         persistenceFlushInterval: TimeInterval = defaultPersistenceFlushInterval,
         evaluationJitter: EvaluationJitterConfig = EvaluationJitterConfig(),
         bootstrapVerification: BootstrapVerificationConfig = BootstrapVerificationConfig(enabled: false),
-        errorSanitization: ErrorSanitizationConfig = ErrorSanitizationConfig()
+        errorSanitization: ErrorSanitizationConfig = ErrorSanitizationConfig(),
+        onUsageUpdate: UsageUpdateCallback? = nil,
+        onSubscriptionError: SubscriptionErrorCallback? = nil,
+        onConnectionLimitError: ConnectionLimitErrorCallback? = nil
     ) {
         self.apiKey = apiKey
         self.secondaryApiKey = secondaryApiKey
@@ -273,6 +285,9 @@ public struct FlagKitOptions: Sendable {
         self.evaluationJitter = evaluationJitter
         self.bootstrapVerification = bootstrapVerification
         self.errorSanitization = errorSanitization
+        self.onUsageUpdate = onUsageUpdate
+        self.onSubscriptionError = onSubscriptionError
+        self.onConnectionLimitError = onConnectionLimitError
     }
 
     /// Validates the options.
@@ -336,6 +351,9 @@ extension FlagKitOptions {
         private var evaluationJitter: EvaluationJitterConfig = EvaluationJitterConfig()
         private var bootstrapVerification: BootstrapVerificationConfig = BootstrapVerificationConfig(enabled: false)
         private var errorSanitization: ErrorSanitizationConfig = ErrorSanitizationConfig()
+        private var onUsageUpdate: UsageUpdateCallback?
+        private var onSubscriptionError: SubscriptionErrorCallback?
+        private var onConnectionLimitError: ConnectionLimitErrorCallback?
 
         public init(apiKey: String) {
             self.apiKey = apiKey
@@ -473,6 +491,24 @@ extension FlagKitOptions {
             return self
         }
 
+        @discardableResult
+        public func onUsageUpdate(_ callback: UsageUpdateCallback?) -> Builder {
+            self.onUsageUpdate = callback
+            return self
+        }
+
+        @discardableResult
+        public func onSubscriptionError(_ callback: SubscriptionErrorCallback?) -> Builder {
+            self.onSubscriptionError = callback
+            return self
+        }
+
+        @discardableResult
+        public func onConnectionLimitError(_ callback: ConnectionLimitErrorCallback?) -> Builder {
+            self.onConnectionLimitError = callback
+            return self
+        }
+
         public func build() -> FlagKitOptions {
             FlagKitOptions(
                 apiKey: apiKey,
@@ -499,7 +535,10 @@ extension FlagKitOptions {
                 persistenceFlushInterval: persistenceFlushInterval,
                 evaluationJitter: evaluationJitter,
                 bootstrapVerification: bootstrapVerification,
-                errorSanitization: errorSanitization
+                errorSanitization: errorSanitization,
+                onUsageUpdate: onUsageUpdate,
+                onSubscriptionError: onSubscriptionError,
+                onConnectionLimitError: onConnectionLimitError
             )
         }
     }
