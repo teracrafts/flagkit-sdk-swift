@@ -9,11 +9,46 @@ public enum StreamingState: String, Sendable {
     case failed
 }
 
+// MARK: - Stream Error Types
+
+/// SSE error codes from server.
+public enum StreamErrorCode: String, Sendable, Codable {
+    /// Token is invalid - re-authenticate completely.
+    case tokenInvalid = "TOKEN_INVALID"
+    /// Token has expired - refresh token and reconnect.
+    case tokenExpired = "TOKEN_EXPIRED"
+    /// Subscription is suspended - notify user, fall back to cached values.
+    case subscriptionSuspended = "SUBSCRIPTION_SUSPENDED"
+    /// Connection limit reached - implement backoff or close other connections.
+    case connectionLimit = "CONNECTION_LIMIT"
+    /// Streaming is unavailable - fall back to polling.
+    case streamingUnavailable = "STREAMING_UNAVAILABLE"
+}
+
+/// SSE error event data structure.
+public struct StreamErrorData: Sendable, Codable {
+    /// The error code.
+    public let code: StreamErrorCode
+    /// Human-readable error message.
+    public let message: String
+
+    public init(code: StreamErrorCode, message: String) {
+        self.code = code
+        self.message = message
+    }
+}
+
 /// Response from the stream token endpoint.
 private struct StreamTokenResponse: Codable {
     let token: String
     let expiresIn: Int
 }
+
+/// Callback type for subscription errors.
+public typealias SubscriptionErrorCallback = @Sendable (String) -> Void
+
+/// Callback type for connection limit errors.
+public typealias ConnectionLimitErrorCallback = @Sendable () -> Void
 
 /// Streaming configuration.
 public struct StreamingConfig: Sendable {
@@ -57,6 +92,9 @@ public actor StreamingManager {
     private let onFlagDelete: @Sendable (String) -> Void
     private let onFlagsReset: @Sendable ([FlagState]) -> Void
     private let onFallbackToPolling: @Sendable () -> Void
+    private let onSubscriptionError: SubscriptionErrorCallback?
+    private let onConnectionLimitError: ConnectionLimitErrorCallback?
+    private let logger: Logger?
 
     private var state: StreamingState = .disconnected
     private var consecutiveFailures = 0
@@ -74,7 +112,10 @@ public actor StreamingManager {
         onFlagUpdate: @escaping @Sendable (FlagState) -> Void,
         onFlagDelete: @escaping @Sendable (String) -> Void,
         onFlagsReset: @escaping @Sendable ([FlagState]) -> Void,
-        onFallbackToPolling: @escaping @Sendable () -> Void
+        onFallbackToPolling: @escaping @Sendable () -> Void,
+        onSubscriptionError: SubscriptionErrorCallback? = nil,
+        onConnectionLimitError: ConnectionLimitErrorCallback? = nil,
+        logger: Logger? = nil
     ) {
         self.baseURL = baseURL
         self.getAPIKey = getAPIKey
@@ -83,6 +124,9 @@ public actor StreamingManager {
         self.onFlagDelete = onFlagDelete
         self.onFlagsReset = onFlagsReset
         self.onFallbackToPolling = onFallbackToPolling
+        self.onSubscriptionError = onSubscriptionError
+        self.onConnectionLimitError = onConnectionLimitError
+        self.logger = logger
 
         let sessionConfig = URLSessionConfiguration.default
         sessionConfig.timeoutIntervalForRequest = .infinity
@@ -255,11 +299,75 @@ public actor StreamingManager {
             case "heartbeat":
                 lastHeartbeat = Date()
 
+            case "error":
+                // Handle SSE error events
+                Task { await handleStreamError(data: data) }
+
             default:
-                break
+                logger?.debug("Unknown stream event type: \(type)")
             }
         } catch {
-            // Failed to parse event
+            logger?.warn("Failed to parse stream event", data: ["type": type, "error": error.localizedDescription])
+        }
+    }
+
+    /// Handles SSE error events from the server.
+    ///
+    /// Error codes:
+    /// - TOKEN_INVALID: Re-authenticate completely
+    /// - TOKEN_EXPIRED: Refresh token and reconnect
+    /// - SUBSCRIPTION_SUSPENDED: Notify user, fall back to cached values
+    /// - CONNECTION_LIMIT: Implement backoff or close other connections
+    /// - STREAMING_UNAVAILABLE: Fall back to polling
+    ///
+    /// - Parameter data: The JSON data string from the error event.
+    private func handleStreamError(data: String) async {
+        guard let jsonData = data.data(using: .utf8) else {
+            logger?.warn("Failed to parse stream error data as UTF-8")
+            return
+        }
+
+        do {
+            let errorData = try JSONDecoder().decode(StreamErrorData.self, from: jsonData)
+            logger?.warn("SSE error event received", data: ["code": errorData.code.rawValue, "message": errorData.message])
+
+            switch errorData.code {
+            case .tokenExpired:
+                // Token expired, refresh and reconnect
+                logger?.info("Stream token expired, refreshing...")
+                cleanup()
+                connect() // Will fetch new token
+
+            case .tokenInvalid:
+                // Token is invalid, need full re-authentication
+                logger?.error("Stream token invalid, re-authenticating...")
+                cleanup()
+                connect() // Will fetch new token
+
+            case .subscriptionSuspended:
+                // Subscription issue - notify and fall back
+                logger?.error("Subscription suspended", data: ["message": errorData.message])
+                onSubscriptionError?(errorData.message)
+                cleanup()
+                state = .failed
+                onFallbackToPolling()
+
+            case .connectionLimit:
+                // Too many connections - implement backoff
+                logger?.warn("Connection limit reached, backing off...")
+                onConnectionLimitError?()
+                await handleConnectionFailure()
+
+            case .streamingUnavailable:
+                // Streaming not available - fall back to polling
+                logger?.warn("Streaming service unavailable, falling back to polling")
+                cleanup()
+                state = .failed
+                onFallbackToPolling()
+            }
+        } catch {
+            // Not a valid JSON error event
+            logger?.debug("Non-JSON error event received", data: ["error": error.localizedDescription])
         }
     }
 
