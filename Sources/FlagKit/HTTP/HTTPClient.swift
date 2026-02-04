@@ -1,5 +1,46 @@
 import Foundation
 
+// MARK: - Usage Metrics
+
+/// Usage metrics extracted from response headers.
+public struct UsageMetrics: Sendable {
+    /// Percentage of API call limit used this period (0-150+).
+    public let apiUsagePercent: Double?
+
+    /// Percentage of evaluation limit used (0-150+).
+    public let evaluationUsagePercent: Double?
+
+    /// Whether approaching rate limit threshold.
+    public let rateLimitWarning: Bool
+
+    /// Current subscription status.
+    public let subscriptionStatus: SubscriptionStatus?
+
+    public init(
+        apiUsagePercent: Double? = nil,
+        evaluationUsagePercent: Double? = nil,
+        rateLimitWarning: Bool = false,
+        subscriptionStatus: SubscriptionStatus? = nil
+    ) {
+        self.apiUsagePercent = apiUsagePercent
+        self.evaluationUsagePercent = evaluationUsagePercent
+        self.rateLimitWarning = rateLimitWarning
+        self.subscriptionStatus = subscriptionStatus
+    }
+}
+
+/// Subscription status values.
+public enum SubscriptionStatus: String, Sendable {
+    case active
+    case trial
+    case pastDue = "past_due"
+    case suspended
+    case cancelled
+}
+
+/// Usage update callback type.
+public typealias UsageUpdateCallback = @Sendable (UsageMetrics) -> Void
+
 /// HTTP client with retry logic and circuit breaker integration.
 actor HTTPClient {
     /// The base URL for the FlagKit API.
@@ -28,6 +69,8 @@ actor HTTPClient {
     private let localPort: Int?
     private let enableRequestSigning: Bool
     private var hasFailedOverToSecondary: Bool = false
+    private let onUsageUpdate: UsageUpdateCallback?
+    private let logger: Logger?
 
     init(
         apiKey: String,
@@ -36,7 +79,9 @@ actor HTTPClient {
         retryAttempts: Int,
         circuitBreaker: CircuitBreaker,
         localPort: Int? = nil,
-        enableRequestSigning: Bool = false
+        enableRequestSigning: Bool = false,
+        onUsageUpdate: UsageUpdateCallback? = nil,
+        logger: Logger? = nil
     ) {
         self.primaryApiKey = apiKey
         self.currentApiKey = apiKey
@@ -46,6 +91,8 @@ actor HTTPClient {
         self.circuitBreaker = circuitBreaker
         self.localPort = localPort
         self.enableRequestSigning = enableRequestSigning
+        self.onUsageUpdate = onUsageUpdate
+        self.logger = logger
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = timeout
@@ -177,7 +224,74 @@ actor HTTPClient {
             throw FlagKitError.networkError("Invalid response")
         }
 
+        // Extract and process usage metrics from response headers
+        let usageMetrics = extractUsageMetrics(from: httpResponse)
+        if let metrics = usageMetrics {
+            // Log warnings for high usage
+            logUsageWarnings(metrics)
+
+            // Notify callback if set
+            onUsageUpdate?(metrics)
+        }
+
         return try parseResponse(data: data, statusCode: httpResponse.statusCode)
+    }
+
+    /// Extracts usage metrics from HTTP response headers.
+    /// - Parameter response: The HTTP response.
+    /// - Returns: UsageMetrics if any usage headers are present, nil otherwise.
+    private func extractUsageMetrics(from response: HTTPURLResponse) -> UsageMetrics? {
+        let headers = response.allHeaderFields
+
+        let apiUsageHeader = headers["X-API-Usage-Percent"] as? String ?? headers["x-api-usage-percent"] as? String
+        let evalUsageHeader = headers["X-Evaluation-Usage-Percent"] as? String ?? headers["x-evaluation-usage-percent"] as? String
+        let rateLimitWarningHeader = headers["X-Rate-Limit-Warning"] as? String ?? headers["x-rate-limit-warning"] as? String
+        let subscriptionStatusHeader = headers["X-Subscription-Status"] as? String ?? headers["x-subscription-status"] as? String
+
+        // Return nil if no usage headers are present
+        guard apiUsageHeader != nil || evalUsageHeader != nil || rateLimitWarningHeader != nil || subscriptionStatusHeader != nil else {
+            return nil
+        }
+
+        var apiUsagePercent: Double?
+        if let header = apiUsageHeader {
+            apiUsagePercent = Double(header)
+        }
+
+        var evaluationUsagePercent: Double?
+        if let header = evalUsageHeader {
+            evaluationUsagePercent = Double(header)
+        }
+
+        let rateLimitWarning = rateLimitWarningHeader == "true"
+
+        var subscriptionStatus: SubscriptionStatus?
+        if let header = subscriptionStatusHeader {
+            subscriptionStatus = SubscriptionStatus(rawValue: header)
+        }
+
+        return UsageMetrics(
+            apiUsagePercent: apiUsagePercent,
+            evaluationUsagePercent: evaluationUsagePercent,
+            rateLimitWarning: rateLimitWarning,
+            subscriptionStatus: subscriptionStatus
+        )
+    }
+
+    /// Logs warnings for high usage metrics.
+    /// - Parameter metrics: The usage metrics to check.
+    private func logUsageWarnings(_ metrics: UsageMetrics) {
+        if let apiUsage = metrics.apiUsagePercent, apiUsage >= 80 {
+            logger?.warn("[FlagKit] API usage at \(apiUsage)%")
+        }
+
+        if let evalUsage = metrics.evaluationUsagePercent, evalUsage >= 80 {
+            logger?.warn("[FlagKit] Evaluation usage at \(evalUsage)%")
+        }
+
+        if metrics.subscriptionStatus == .suspended {
+            logger?.error("[FlagKit] Subscription suspended - service degraded")
+        }
     }
 
     private func parseResponse(data: Data, statusCode: Int) throws -> [String: Any] {
