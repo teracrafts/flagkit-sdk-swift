@@ -37,7 +37,8 @@ public actor FlagKitClient {
             retryAttempts: options.retryAttempts,
             circuitBreaker: circuitBreaker,
             localPort: options.localPort,
-            enableRequestSigning: options.enableRequestSigning
+            enableRequestSigning: options.enableRequestSigning,
+            onUsageUpdate: options.onUsageUpdate
         )
 
         self.cache = Cache(
