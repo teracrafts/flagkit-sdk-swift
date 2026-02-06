@@ -10,6 +10,7 @@ public actor FlagKitClient {
     private let circuitBreaker: CircuitBreaker
     private let cache: Cache<FlagState>
     private let contextManager: ContextManager
+    private let logger: Logger?
     private var pollingManager: PollingManager?
     private var eventQueue: EventQueue?
     private var isReady = false
@@ -20,10 +21,12 @@ public actor FlagKitClient {
 
     /// Creates a new FlagKit client.
     /// - Parameter options: The client options.
-    public init(options: FlagKitOptions) {
+    /// - Parameter logger: Optional logger for SDK messages. Defaults to a console logger.
+    public init(options: FlagKitOptions, logger: Logger? = nil) {
         self.options = options
         self.contextManager = ContextManager()
         self.sessionId = UUID().uuidString
+        self.logger = logger ?? DefaultLogger()
 
         self.circuitBreaker = CircuitBreaker(
             failureThreshold: options.circuitBreakerThreshold,
@@ -38,7 +41,8 @@ public actor FlagKitClient {
             circuitBreaker: circuitBreaker,
             localPort: options.localPort,
             enableRequestSigning: options.enableRequestSigning,
-            onUsageUpdate: options.onUsageUpdate
+            onUsageUpdate: options.onUsageUpdate,
+            logger: self.logger
         )
 
         self.cache = Cache(
@@ -521,12 +525,68 @@ public actor FlagKitClient {
 
     private func fetchInitialFlags() async throws {
         let response = try await httpClient.get("/sdk/init")
+
+        // Check SDK version metadata from the response
+        checkVersionMetadata(response)
+
         guard let flags = response["flags"] as? [[String: Any]] else { return }
 
         for flagData in flags {
             if let flagState = try? decodeFlagState(from: flagData) {
                 await cache.set(flagState.key, value: flagState)
             }
+        }
+    }
+
+    // MARK: - Version Metadata Checking
+
+    /// Checks SDK version metadata from init response and emits appropriate warnings.
+    ///
+    /// Per spec, the SDK should parse and surface:
+    /// - sdkVersionMin: Minimum required version (older may not work)
+    /// - sdkVersionRecommended: Recommended version for optimal experience
+    /// - sdkVersionLatest: Latest available version
+    /// - deprecationWarning: Server-provided deprecation message
+    private func checkVersionMetadata(_ response: [String: Any]) {
+        guard let metadata = response["metadata"] as? [String: Any] else {
+            return
+        }
+
+        // Check for server-provided deprecation warning first
+        if let deprecationWarning = metadata["deprecationWarning"] as? String, !deprecationWarning.isEmpty {
+            logger?.warn("[FlagKit] Deprecation Warning: \(deprecationWarning)")
+        }
+
+        let sdkVersionMin = metadata["sdkVersionMin"] as? String
+        let sdkVersionRecommended = metadata["sdkVersionRecommended"] as? String
+        let sdkVersionLatest = metadata["sdkVersionLatest"] as? String
+
+        // Check minimum version requirement
+        if let minVersion = sdkVersionMin, isVersionLessThan(Self.sdkVersion, minVersion) {
+            logger?.error(
+                "[FlagKit] SDK version \(Self.sdkVersion) is below minimum required version \(minVersion). " +
+                "Some features may not work correctly. Please upgrade the SDK."
+            )
+        }
+
+        // Check recommended version
+        var warnedAboutRecommended = false
+        if let recommendedVersion = sdkVersionRecommended, isVersionLessThan(Self.sdkVersion, recommendedVersion) {
+            logger?.warn(
+                "[FlagKit] SDK version \(Self.sdkVersion) is below recommended version \(recommendedVersion). " +
+                "Consider upgrading for the best experience."
+            )
+            warnedAboutRecommended = true
+        }
+
+        // Log if a newer version is available (info level, not a warning)
+        // Only log if we haven't already warned about recommended
+        if let latestVersion = sdkVersionLatest,
+           isVersionLessThan(Self.sdkVersion, latestVersion),
+           !warnedAboutRecommended {
+            logger?.info(
+                "[FlagKit] SDK version \(Self.sdkVersion) - a newer version \(latestVersion) is available."
+            )
         }
     }
 
@@ -597,11 +657,13 @@ public actor FlagKitClient {
 
 extension FlagKitClient {
     /// Creates and initializes a FlagKit client.
-    /// - Parameter options: The client options.
+    /// - Parameters:
+    ///   - options: The client options.
+    ///   - logger: Optional logger for SDK messages. Defaults to a console logger.
     /// - Returns: An initialized FlagKit client.
     /// - Throws: If initialization fails critically.
-    public static func create(options: FlagKitOptions) async throws -> FlagKitClient {
-        let client = FlagKitClient(options: options)
+    public static func create(options: FlagKitOptions, logger: Logger? = nil) async throws -> FlagKitClient {
+        let client = FlagKitClient(options: options, logger: logger)
         try await client.initialize()
         return client
     }
