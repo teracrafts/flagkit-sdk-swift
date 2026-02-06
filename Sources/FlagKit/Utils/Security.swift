@@ -18,6 +18,67 @@ public extension Logger {
     func error(_ message: String) { error(message, data: nil) }
 }
 
+// MARK: - Default Logger
+
+/// Default console logger implementation for the FlagKit SDK.
+/// Outputs messages to the console with appropriate log level prefixes.
+public final class DefaultLogger: Logger, @unchecked Sendable {
+    /// Log level for filtering messages.
+    public enum LogLevel: Int, Comparable, Sendable {
+        case debug = 0
+        case info = 1
+        case warn = 2
+        case error = 3
+
+        public static func < (lhs: LogLevel, rhs: LogLevel) -> Bool {
+            lhs.rawValue < rhs.rawValue
+        }
+    }
+
+    /// Minimum log level to output. Messages below this level are ignored.
+    public let minLevel: LogLevel
+
+    /// Creates a new default logger.
+    /// - Parameter minLevel: Minimum log level to output (default: .info).
+    public init(minLevel: LogLevel = .info) {
+        self.minLevel = minLevel
+    }
+
+    public func debug(_ message: String, data: [String: Any]?) {
+        guard minLevel <= .debug else { return }
+        log("DEBUG", message: message, data: data)
+    }
+
+    public func info(_ message: String, data: [String: Any]?) {
+        guard minLevel <= .info else { return }
+        log("INFO", message: message, data: data)
+    }
+
+    public func warn(_ message: String, data: [String: Any]?) {
+        guard minLevel <= .warn else { return }
+        log("WARN", message: message, data: data)
+    }
+
+    public func error(_ message: String, data: [String: Any]?) {
+        guard minLevel <= .error else { return }
+        log("ERROR", message: message, data: data)
+    }
+
+    private func log(_ level: String, message: String, data: [String: Any]?) {
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+        var output = "[\(timestamp)] [\(level)] \(message)"
+
+        if let data = data, !data.isEmpty {
+            if let jsonData = try? JSONSerialization.data(withJSONObject: data, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                output += " \(jsonString)"
+            }
+        }
+
+        print(output)
+    }
+}
+
 // MARK: - Security Error
 
 /// Security-related errors for FlagKit SDK.
