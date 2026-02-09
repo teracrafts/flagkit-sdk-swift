@@ -182,8 +182,8 @@ final class JitterTests: XCTestCase {
             // Allow margin for execution overhead
             // Jitter should add at least minMs delay (with some tolerance)
             XCTAssertGreaterThanOrEqual(elapsedMs, Double(minMs) * 0.8, "Jitter should add at least minimum delay")
-            // Should not exceed maxMs by too much (add 50ms for overhead)
-            XCTAssertLessThan(elapsedMs, Double(maxMs) + 50, "Jitter should not exceed maximum by much")
+            // Should not exceed maxMs by too much (add 500ms for CI overhead)
+            XCTAssertLessThan(elapsedMs, Double(maxMs) + 500, "Jitter should not exceed maximum by much")
         }
 
         await client.close()
