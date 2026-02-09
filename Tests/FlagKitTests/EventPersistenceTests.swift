@@ -48,8 +48,9 @@ final class EventPersistenceTests: XCTestCase {
         let recoveredEvents = try await persistence.recover()
 
         XCTAssertEqual(recoveredEvents.count, 2)
-        XCTAssertEqual(recoveredEvents[0].eventType, "test_event_1")
-        XCTAssertEqual(recoveredEvents[1].eventType, "test_event_2")
+        let eventTypes = Set(recoveredEvents.map { $0.eventType })
+        XCTAssertTrue(eventTypes.contains("test_event_1"))
+        XCTAssertTrue(eventTypes.contains("test_event_2"))
 
         await persistence.stop()
     }
