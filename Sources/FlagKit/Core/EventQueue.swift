@@ -91,7 +91,7 @@ public struct AnalyticsEvent: Sendable {
         timestamp: Date = Date(),
         userId: String? = nil,
         sessionId: String? = nil,
-        sdkVersion: String = "1.0.5"
+        sdkVersion: String = "1.0.6"
     ) {
         self.eventType = eventType
         self.eventData = eventData
