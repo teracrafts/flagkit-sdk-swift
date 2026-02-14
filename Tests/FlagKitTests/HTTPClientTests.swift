@@ -3,22 +3,32 @@ import XCTest
 
 final class HTTPClientTests: XCTestCase {
     func testGetBaseUrlDefault() {
-        let url = HTTPClient.getBaseUrl(localPort: nil)
+        setenv("FLAGKIT_MODE", "", 1)
+        let url = HTTPClient.getBaseUrl()
         XCTAssertEqual(url, "https://api.flagkit.dev/api/v1")
     }
 
-    func testGetBaseUrlWithLocalPort() {
-        let url = HTTPClient.getBaseUrl(localPort: 8200)
-        XCTAssertEqual(url, "http://localhost:8200/api/v1")
+    func testGetBaseUrlWithLocalMode() {
+        setenv("FLAGKIT_MODE", "local", 1)
+        let url = HTTPClient.getBaseUrl()
+        XCTAssertEqual(url, "https://api.flagkit.on/api/v1")
     }
 
-    func testGetBaseUrlWithCustomPort() {
-        let url = HTTPClient.getBaseUrl(localPort: 3000)
-        XCTAssertEqual(url, "http://localhost:3000/api/v1")
+    func testGetBaseUrlWithBetaMode() {
+        setenv("FLAGKIT_MODE", "beta", 1)
+        let url = HTTPClient.getBaseUrl()
+        XCTAssertEqual(url, "https://api.beta.flagkit.dev/api/v1")
     }
 
-    func testGetBaseUrlWithPort80() {
-        let url = HTTPClient.getBaseUrl(localPort: 80)
-        XCTAssertEqual(url, "http://localhost:80/api/v1")
+    func testGetBaseUrlTrimsWhitespace() {
+        setenv("FLAGKIT_MODE", " local ", 1)
+        let url = HTTPClient.getBaseUrl()
+        XCTAssertEqual(url, "https://api.flagkit.on/api/v1")
+    }
+
+    func testGetBaseUrlFallsThroughForUnknownMode() {
+        setenv("FLAGKIT_MODE", "staging", 1)
+        let url = HTTPClient.getBaseUrl()
+        XCTAssertEqual(url, "https://api.flagkit.dev/api/v1")
     }
 }
