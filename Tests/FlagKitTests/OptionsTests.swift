@@ -17,7 +17,6 @@ final class OptionsTests: XCTestCase {
         XCTAssertEqual(options.retryAttempts, 3)
         XCTAssertEqual(options.circuitBreakerThreshold, 5)
         XCTAssertEqual(options.circuitBreakerResetTimeout, 30)
-        XCTAssertNil(options.localPort)
     }
 
     func testCustomValues() {
@@ -106,24 +105,4 @@ final class OptionsTests: XCTestCase {
         XCTAssertFalse(options.eventsEnabled)
     }
 
-    func testLocalPortOption() {
-        let options = FlagKitOptions(apiKey: "sdk_test_key", localPort: 8200)
-
-        XCTAssertEqual(options.localPort, 8200)
-    }
-
-    func testLocalPortBuilder() {
-        let options = FlagKitOptions.Builder(apiKey: "sdk_test")
-            .localPort(3000)
-            .build()
-
-        XCTAssertEqual(options.localPort, 3000)
-    }
-
-    func testLocalPortDefaultNil() {
-        let options = FlagKitOptions.Builder(apiKey: "sdk_test")
-            .build()
-
-        XCTAssertNil(options.localPort)
-    }
 }
