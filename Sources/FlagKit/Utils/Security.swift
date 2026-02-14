@@ -83,8 +83,6 @@ public final class DefaultLogger: Logger, @unchecked Sendable {
 
 /// Security-related errors for FlagKit SDK.
 public enum SecurityError: Error, Sendable, LocalizedError {
-    /// Local port cannot be used in production environment.
-    case localPortInProduction
     /// PII detected without privateAttributes (strict mode).
     case piiDetectedStrictMode(fields: [String])
     /// Encryption failed.
@@ -98,18 +96,16 @@ public enum SecurityError: Error, Sendable, LocalizedError {
 
     public var errorDescription: String? {
         switch self {
-        case .localPortInProduction:
-            return "[SECURITY_ERROR] Local port cannot be used in production environment (APP_ENV=production)"
         case .piiDetectedStrictMode(let fields):
-            return "[SECURITY_ERROR] PII detected in strict mode without privateAttributes: \(fields.joined(separator: ", "))"
+            return "PII detected in strict mode without privateAttributes: \(fields.joined(separator: ", ")). All PII fields must be listed in privateAttributes when strict mode is enabled."
         case .encryptionFailed(let reason):
-            return "[SECURITY_ERROR] Encryption failed: \(reason)"
+            return "Encryption failed: \(reason)"
         case .decryptionFailed(let reason):
-            return "[SECURITY_ERROR] Decryption failed: \(reason)"
+            return "Decryption failed: \(reason)"
         case .keyDerivationFailed:
-            return "[SECURITY_ERROR] Key derivation failed"
+            return "Key derivation failed"
         case .bootstrapVerificationFailed(let reason):
-            return "[SECURITY_ERROR] Bootstrap verification failed: \(reason)"
+            return "Bootstrap verification failed: \(reason)"
         }
     }
 }
@@ -490,17 +486,6 @@ public func validatePII(
 /// - Returns: True if APP_ENV is "production".
 public func isProductionEnvironment() -> Bool {
     ProcessInfo.processInfo.environment["APP_ENV"] == "production"
-}
-
-/// Validates that localPort is not used in production environment.
-/// - Parameter localPort: The local port setting, if any.
-/// - Throws: SecurityError.localPortInProduction if localPort is set in production.
-public func validateLocalPortRestriction(localPort: Int?) throws {
-    guard let _ = localPort else { return }
-
-    if isProductionEnvironment() {
-        throw SecurityError.localPortInProduction
-    }
 }
 
 // MARK: - HMAC-SHA256 Request Signing
