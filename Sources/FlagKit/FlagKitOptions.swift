@@ -187,9 +187,6 @@ public struct FlagKitOptions: @unchecked Sendable {
     /// Bootstrap data.
     public let bootstrap: [String: Any]?
 
-    /// Local development server port. When set, uses http://localhost:{port}/api/v1.
-    public let localPort: Int?
-
     /// Strict PII mode: throws SecurityError instead of warning when PII is detected.
     public let strictPIIMode: Bool
 
@@ -245,7 +242,6 @@ public struct FlagKitOptions: @unchecked Sendable {
         circuitBreakerThreshold: Int = defaultCircuitBreakerThreshold,
         circuitBreakerResetTimeout: TimeInterval = defaultCircuitBreakerResetTimeout,
         bootstrap: [String: Any]? = nil,
-        localPort: Int? = nil,
         strictPIIMode: Bool = false,
         enableRequestSigning: Bool = false,
         enableCacheEncryption: Bool = false,
@@ -274,7 +270,6 @@ public struct FlagKitOptions: @unchecked Sendable {
         self.circuitBreakerThreshold = circuitBreakerThreshold
         self.circuitBreakerResetTimeout = circuitBreakerResetTimeout
         self.bootstrap = bootstrap
-        self.localPort = localPort
         self.strictPIIMode = strictPIIMode
         self.enableRequestSigning = enableRequestSigning
         self.enableCacheEncryption = enableCacheEncryption
@@ -315,9 +310,6 @@ public struct FlagKitOptions: @unchecked Sendable {
         guard cacheTTL > 0 else {
             throw FlagKitError.configError(code: .configInvalidCacheTtl, message: "Cache TTL must be positive")
         }
-
-        // Validate localPort restriction in production
-        try validateLocalPortRestriction(localPort: localPort)
     }
 }
 
@@ -340,7 +332,6 @@ extension FlagKitOptions {
         private var circuitBreakerThreshold: Int = FlagKitOptions.defaultCircuitBreakerThreshold
         private var circuitBreakerResetTimeout: TimeInterval = FlagKitOptions.defaultCircuitBreakerResetTimeout
         private var bootstrap: [String: Any]?
-        private var localPort: Int?
         private var strictPIIMode: Bool = false
         private var enableRequestSigning: Bool = false
         private var enableCacheEncryption: Bool = false
@@ -422,12 +413,6 @@ extension FlagKitOptions {
         @discardableResult
         public func bootstrap(_ data: [String: Any]) -> Builder {
             self.bootstrap = data
-            return self
-        }
-
-        @discardableResult
-        public func localPort(_ port: Int) -> Builder {
-            self.localPort = port
             return self
         }
 
@@ -525,7 +510,6 @@ extension FlagKitOptions {
                 circuitBreakerThreshold: circuitBreakerThreshold,
                 circuitBreakerResetTimeout: circuitBreakerResetTimeout,
                 bootstrap: bootstrap,
-                localPort: localPort,
                 strictPIIMode: strictPIIMode,
                 enableRequestSigning: enableRequestSigning,
                 enableCacheEncryption: enableCacheEncryption,
