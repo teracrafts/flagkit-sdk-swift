@@ -39,7 +39,6 @@ public actor FlagKitClient {
             timeout: options.timeout,
             retryAttempts: options.retryAttempts,
             circuitBreaker: circuitBreaker,
-            localPort: options.localPort,
             enableRequestSigning: options.enableRequestSigning,
             onUsageUpdate: options.onUsageUpdate,
             logger: self.logger
