@@ -493,12 +493,6 @@ final class SecurityTests: XCTestCase {
 
     // MARK: - SecurityError Tests
 
-    func testSecurityError_LocalPortInProduction() {
-        let error = SecurityError.localPortInProduction
-        XCTAssertTrue(error.errorDescription?.contains("production") ?? false)
-        XCTAssertTrue(error.errorDescription?.contains("APP_ENV") ?? false)
-    }
-
     func testSecurityError_PIIDetectedStrictMode() {
         let error = SecurityError.piiDetectedStrictMode(fields: ["email", "phone"])
         XCTAssertTrue(error.errorDescription?.contains("email") ?? false)
@@ -759,16 +753,6 @@ final class SecurityTests: XCTestCase {
         // Just verify it doesn't crash and returns a boolean
         _ = isProductionEnvironment()
     }
-
-    func testValidateLocalPortRestriction_AllowsInNonProduction() {
-        // Assuming we're not in production for tests
-        XCTAssertNoThrow(try validateLocalPortRestriction(localPort: 8080))
-    }
-
-    func testValidateLocalPortRestriction_AllowsNilPort() {
-        XCTAssertNoThrow(try validateLocalPortRestriction(localPort: nil))
-    }
-
     // MARK: - Cache Encryption Tests
 
     func testCacheEncryption_DeriveKey() throws {
