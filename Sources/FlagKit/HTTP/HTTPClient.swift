@@ -45,11 +45,17 @@ public typealias UsageUpdateCallback = @Sendable (UsageMetrics) -> Void
 actor HTTPClient {
     /// The base URL for the FlagKit API.
     static let baseURL = "https://api.flagkit.dev/api/v1"
+    static let betaBaseURL = "https://api.beta.flagkit.dev/api/v1"
+    static let localBaseURL = "https://api.flagkit.on/api/v1"
 
-    /// Returns the base URL for the given local port, or the default production URL.
-    static func getBaseUrl(localPort: Int?) -> String {
-        if let port = localPort {
-            return "http://localhost:\(port)/api/v1"
+    /// Returns the base URL based on internal SDK mode.
+    static func getBaseUrl() -> String {
+        let mode = ProcessInfo.processInfo.environment["FLAGKIT_MODE"]?.trimmingCharacters(in: .whitespaces).lowercased()
+        if mode == "local" {
+            return localBaseURL
+        }
+        if mode == "beta" {
+            return betaBaseURL
         }
         return baseURL
     }
@@ -66,11 +72,11 @@ actor HTTPClient {
     private let retryAttempts: Int
     private let circuitBreaker: CircuitBreaker
     private let session: URLSession
-    private let localPort: Int?
     private let enableRequestSigning: Bool
     private var hasFailedOverToSecondary: Bool = false
     private let onUsageUpdate: UsageUpdateCallback?
     private let logger: Logger?
+    private let resolvedBaseURL: String
 
     init(
         apiKey: String,
@@ -78,7 +84,6 @@ actor HTTPClient {
         timeout: TimeInterval,
         retryAttempts: Int,
         circuitBreaker: CircuitBreaker,
-        localPort: Int? = nil,
         enableRequestSigning: Bool = false,
         onUsageUpdate: UsageUpdateCallback? = nil,
         logger: Logger? = nil
@@ -89,10 +94,11 @@ actor HTTPClient {
         self.timeout = timeout
         self.retryAttempts = retryAttempts
         self.circuitBreaker = circuitBreaker
-        self.localPort = localPort
         self.enableRequestSigning = enableRequestSigning
         self.onUsageUpdate = onUsageUpdate
         self.logger = logger
+
+        self.resolvedBaseURL = Self.getBaseUrl()
 
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = timeout
@@ -183,8 +189,7 @@ actor HTTPClient {
         params: [String: String]?,
         body: [String: Any]?
     ) async throws -> [String: Any] {
-        let effectiveBaseURL = Self.getBaseUrl(localPort: localPort)
-        var urlString = "\(effectiveBaseURL)\(path)"
+        var urlString = "\(resolvedBaseURL)\(path)"
 
         if let params = params, !params.isEmpty {
             let queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) }
