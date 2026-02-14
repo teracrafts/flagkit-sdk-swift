@@ -69,7 +69,6 @@ let options = FlagKitOptions.Builder(apiKey: "sdk_your_api_key")
     .eventFlushInterval(30)                         // Seconds between flushes
     .timeout(10)                                    // Request timeout in seconds
     .retryAttempts(3)                               // Number of retry attempts
-    .localPort(8200)                                // Use local dev server on port 8200
     .build()
 
 let client = try await FlagKit.initialize(options: options)
@@ -77,11 +76,9 @@ let client = try await FlagKit.initialize(options: options)
 
 ## Local Development
 
-For local development, use the `localPort` option to connect to a local FlagKit server:
 
 ```swift
 let options = FlagKitOptions.Builder(apiKey: "sdk_your_api_key")
-    .localPort(8200)  // Uses http://localhost:8200/api/v1
     .build()
 
 let client = try await FlagKit.initialize(options: options)
