@@ -58,3 +58,9 @@ All verifications passed!
 ## Note
 
 The sdk-lab target is defined in Package.swift as a separate executable and is not included in the library product.
+
+## Mode Routing
+Use `FLAGKIT_MODE` to control API target during SDK Lab runs:
+- `local` -> `https://api.flagkit.on/api/v1`
+- `beta` -> `https://api.beta.flagkit.dev/api/v1`
+- `carbon` (default) -> `https://api.flagkit.dev/api/v1`
