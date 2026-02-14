@@ -3,7 +3,7 @@ import Foundation
 /// The main FlagKit client for evaluating feature flags.
 public actor FlagKitClient {
     /// SDK version identifier.
-    public static let sdkVersion = "1.0.8"
+    public static let sdkVersion = "1.0.9"
 
     private let options: FlagKitOptions
     private let httpClient: HTTPClient

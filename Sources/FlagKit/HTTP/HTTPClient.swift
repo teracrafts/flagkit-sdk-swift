@@ -207,8 +207,8 @@ actor HTTPClient {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.setValue(currentApiKey, forHTTPHeaderField: "X-API-Key")
-        request.setValue("FlagKit-Swift/1.0.8", forHTTPHeaderField: "User-Agent")
-        request.setValue("1.0.8", forHTTPHeaderField: "X-FlagKit-SDK-Version")
+        request.setValue("FlagKit-Swift/1.0.9", forHTTPHeaderField: "User-Agent")
+        request.setValue("1.0.9", forHTTPHeaderField: "X-FlagKit-SDK-Version")
         request.setValue("swift", forHTTPHeaderField: "X-FlagKit-SDK-Language")
 
         if let body = body {
